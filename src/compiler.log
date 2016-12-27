@@ -1,0 +1,1283 @@
+(begin (define (newline port) (display #\newline port)) (define (print-elements list port) (if (not (null? list)) (begin (display (car list) port) (print-elements (cdr list) port)))) (define (print-code code port) (display (quote |/**\x20;\x5c;file\x20;*/|) port) (newline port) (display (quote |#include\x20;<kscm.h>|) port) (newline port) (display (quote |int\x20;main\x20;(int\x20;argc,char\x20;*argv[]){init();get_command_line(argc,\x20;argv);|) port) (print-elements (c-caddr code) port) (display (quote |printf("=>\x20;");object_write_stdout(val);puts("");}|) port)) (define undef (if #false 0)) (define (pair->c obj) (c-append (quote (|(|)) (obj->c (car obj)) (quote (|\x20;.\x20;|)) (obj->c (cdr obj)) (quote (|)|)))) (define (obj->c obj) (if (number? obj) (list obj) (if (string? obj) (c-string->c obj) (if (symbol? obj) (c-symbol->c obj) (if (pair? obj) (pair->c obj) (if (null? obj) (quote (|()|)) (if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj))))))))) (define (const obj) (if (eq? obj undef) (quote (undef)) (if (eof-object? obj) (quote (eof_obj)) (c-append (quote (|c_str_to_datum("|)) (obj->c obj) (quote (|")|)))))) (define (definition-value exp) (if (symbol? (c-cadr exp)) (c-caddr exp) (c-make-lambda (c-cdadr exp) (c-cddr exp)))) (define (and->if exp) (if (null? exp) #true (begin (define (iter o) (if (null? (cdr o)) (car o) (list (quote if) (car o) (iter (cdr o)) (quote #false)))) (iter exp)))) (define (or->if exp) (if (null? exp) (quote #false) (list (quote if) (car exp) (car exp) (cons (quote or) (cdr exp))))) (define log-port (open-output-file "compiler.log")) (define (compile exp target linkage) (display exp log-port) (newline log-port) (if (c-self-evaluating? exp) (compile-self-evaluating exp target linkage) (if (symbol? exp) (compile-variable exp target linkage) (if (pair? exp) ((lambda (o) (if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage))) (car exp)) (error (quote |unknown\x20;expression\x20;type\x20;--\x20;compile|) exp))))) (define (compile-linkage linkage) (if (eq? linkage (quote return)) (c-make-instruction-sequence (quote (cont)) (quote ()) (quote (|goto\x20;*cont.cont;|))) (if (eq? linkage (quote next)) (c-empty-instruction-sequence) (c-make-instruction-sequence (quote ()) (quote ()) (list (quote |goto\x20;|) linkage (quote |;|)))))) (define (end-with-linkage linkage instruction-sequence) (preserving (quote (cont)) instruction-sequence (compile-linkage linkage))) (define (compile-self-evaluating exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const exp) (quote (|;|)))))) (define (compile-variable exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote (env)) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;lookup_var_val(c_str_to_datum("|)) (c-symbol->c exp) (quote (|"));|)))))) (define (compile-quoted exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const (c-cadr exp)) (quote (|;|)))))) (define (compile-assignment exp target linkage) ((lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))) (c-cadr exp) (compile (c-caddr exp) (quote val) (quote next)))) (define (compile-definition exp target linkage) ((lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))) (c-definition-variable exp) (compile (definition-value exp) (quote val) (quote next)))) (define (compile-if exp target linkage) ((lambda (f-branch after-if) ((lambda (consequent-linkage) ((lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))) (compile (c-cadr exp) (quote val) (quote next)) (compile (c-caddr exp) target consequent-linkage) (compile (c-if-alternative exp) target linkage))) (if (eq? linkage (quote next)) after-if linkage))) (make-label (quote false_branch)) (make-label (quote after_if)))) (define (compile-sequence seq target linkage) (if (null? (cdr seq)) (compile (car seq) target linkage) (preserving (quote (env cont)) (compile (car seq) target (quote next)) (compile-sequence (cdr seq) target linkage)))) (define (compile-lambda exp target linkage) ((lambda (proc-entry after-lambda) ((lambda (lambda-linkage) (append-instruction-sequences (tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry)) (if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-lambda linkage))) (make-label (quote entry)) (make-label (quote after_lambda)))) (define (compile-lambda-body exp proc-entry) ((lambda (formals) (append-instruction-sequences (c-make-instruction-sequence (quote (env proc argl)) (quote (env)) (c-append (list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)) (const formals) (quote (|);|)))) (compile-sequence (c-cddr exp) (quote val) (quote return)))) (c-cadr exp))) (define (compile-application exp target linkage) (define (iter proc lst) (if (null? lst) (quote ()) (cons (proc (car lst)) (iter proc (cdr lst))))) ((lambda (proc-code operand-codes) (preserving (quote (env cont)) proc-code (preserving (quote (proc cont)) (construct-arglist operand-codes) (compile-procedure-call target linkage)))) (compile (car exp) (quote proc) (quote next)) (iter (lambda (operand) (compile operand (quote val) (quote next))) (cdr exp)))) (define (construct-arglist operand-codes) ((lambda (operand-codes) (if (null? operand-codes) (c-make-instruction-sequence (quote ()) (quote (argl)) (quote (|argl\x20;=\x20;empty;|))) ((lambda (code-to-get-last-arg) (if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes))))) (append-instruction-sequences (car operand-codes) (c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|))))))) (c-reverse operand-codes))) (define (code-to-get-rest-args operand-codes) ((lambda (code-for-next-arg) (if (null? (cdr operand-codes)) code-for-next-arg (preserving (quote (env)) code-for-next-arg (code-to-get-rest-args (cdr operand-codes))))) (preserving (quote (argl)) (car operand-codes) (c-make-instruction-sequence (quote (val argl)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),\x20;argl);|)))))) (define (compile-procedure-call target linkage) ((lambda (primitive-branch after-call) ((lambda (compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))) (parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-call linkage))) (make-label (quote primitive_branch)) (make-label (quote after_call)))) (define (compile-proc-appl target linkage) (if (and (eq? target (quote val)) (not (eq? linkage (quote return)))) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) linkage (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (not (eq? linkage (quote return)))) ((lambda (proc-return) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|)))) (make-label (quote proc_return))) (if (and (eq? target (quote val)) (eq? linkage (quote return))) (c-make-instruction-sequence (quote (proc cont)) all-regs (quote (|object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (eq? linkage (quote return))) (error (quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|) target)))))) (define all-regs (quote (env proc val argl cont))) (define (append-instruction-sequences . seqs) (define (append-2-sequences seq1 seq2) (c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-list-difference (c-registers-needed seq2) (c-registers-modified seq1))) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2)))) (define (append-seq-list seqs) (if (null? seqs) (c-empty-instruction-sequence) (append-2-sequences (car seqs) (append-seq-list (cdr seqs))))) (append-seq-list seqs)) (define (preserving regs seq1 seq2) (if (null? regs) (append-instruction-sequences seq1 seq2) ((lambda (first-reg) (if (and (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg)) (preserving (cdr regs) (c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))) seq2) (preserving (cdr regs) seq1 seq2))) (car regs)))) (define (tack-on-instruction-sequence seq body-seq) (c-make-instruction-sequence (c-registers-needed seq) (c-registers-modified seq) (c-append (c-statements seq) (c-statements body-seq)))) (define (parallel-instruction-sequences seq1 seq2) (c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-registers-needed seq2)) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2)))) (define input-file (open-input-file "input.scm")) (define output-file (open-output-file "output.c")) (define data (read input-file)) (define code (compile data (quote val) (quote next))) (print-code code output-file) (quote compiled))
+(quote compiled)
+(print-code code output-file)
+output-file
+code
+print-code
+(define code (compile data (quote val) (quote next)))
+(compile data (quote val) (quote next))
+(quote next)
+(quote val)
+data
+compile
+(define data (read input-file))
+(read input-file)
+input-file
+read
+(define output-file (open-output-file "output.c"))
+(open-output-file "output.c")
+output.c
+open-output-file
+(define input-file (open-input-file "input.scm"))
+(open-input-file "input.scm")
+input.scm
+open-input-file
+(define (parallel-instruction-sequences seq1 seq2) (c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-registers-needed seq2)) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2))))
+(lambda (seq1 seq2) (c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-registers-needed seq2)) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2))))
+(c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-registers-needed seq2)) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2)))
+(c-append (c-statements seq1) (c-statements seq2))
+(c-statements seq2)
+seq2
+c-statements
+(c-statements seq1)
+seq1
+c-statements
+c-append
+(c-list-union (c-registers-modified seq1) (c-registers-modified seq2))
+(c-registers-modified seq2)
+seq2
+c-registers-modified
+(c-registers-modified seq1)
+seq1
+c-registers-modified
+c-list-union
+(c-list-union (c-registers-needed seq1) (c-registers-needed seq2))
+(c-registers-needed seq2)
+seq2
+c-registers-needed
+(c-registers-needed seq1)
+seq1
+c-registers-needed
+c-list-union
+c-make-instruction-sequence
+(define (tack-on-instruction-sequence seq body-seq) (c-make-instruction-sequence (c-registers-needed seq) (c-registers-modified seq) (c-append (c-statements seq) (c-statements body-seq))))
+(lambda (seq body-seq) (c-make-instruction-sequence (c-registers-needed seq) (c-registers-modified seq) (c-append (c-statements seq) (c-statements body-seq))))
+(c-make-instruction-sequence (c-registers-needed seq) (c-registers-modified seq) (c-append (c-statements seq) (c-statements body-seq)))
+(c-append (c-statements seq) (c-statements body-seq))
+(c-statements body-seq)
+body-seq
+c-statements
+(c-statements seq)
+seq
+c-statements
+c-append
+(c-registers-modified seq)
+seq
+c-registers-modified
+(c-registers-needed seq)
+seq
+c-registers-needed
+c-make-instruction-sequence
+(define (preserving regs seq1 seq2) (if (null? regs) (append-instruction-sequences seq1 seq2) ((lambda (first-reg) (if (and (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg)) (preserving (cdr regs) (c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))) seq2) (preserving (cdr regs) seq1 seq2))) (car regs))))
+(lambda (regs seq1 seq2) (if (null? regs) (append-instruction-sequences seq1 seq2) ((lambda (first-reg) (if (and (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg)) (preserving (cdr regs) (c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))) seq2) (preserving (cdr regs) seq1 seq2))) (car regs))))
+(if (null? regs) (append-instruction-sequences seq1 seq2) ((lambda (first-reg) (if (and (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg)) (preserving (cdr regs) (c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))) seq2) (preserving (cdr regs) seq1 seq2))) (car regs)))
+((lambda (first-reg) (if (and (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg)) (preserving (cdr regs) (c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))) seq2) (preserving (cdr regs) seq1 seq2))) (car regs))
+(car regs)
+regs
+car
+(lambda (first-reg) (if (and (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg)) (preserving (cdr regs) (c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))) seq2) (preserving (cdr regs) seq1 seq2)))
+(if (and (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg)) (preserving (cdr regs) (c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))) seq2) (preserving (cdr regs) seq1 seq2))
+(preserving (cdr regs) seq1 seq2)
+seq2
+seq1
+(cdr regs)
+regs
+cdr
+preserving
+(preserving (cdr regs) (c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))) seq2)
+seq2
+(c-make-instruction-sequence (c-list-union (list first-reg) (c-registers-needed seq1)) (c-list-difference (c-registers-modified seq1) (list first-reg)) (c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|))))
+(c-append (list (quote |save(|) first-reg (quote |);|)) (c-statements seq1) (list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|)))
+(list (quote |object_free(&|) first-reg (quote |);|) first-reg (quote |\x20;=restore();|))
+(quote |\x20;=restore();|)
+first-reg
+(quote |);|)
+first-reg
+(quote |object_free(&|)
+list
+(c-statements seq1)
+seq1
+c-statements
+(list (quote |save(|) first-reg (quote |);|))
+(quote |);|)
+first-reg
+(quote |save(|)
+list
+c-append
+(c-list-difference (c-registers-modified seq1) (list first-reg))
+(list first-reg)
+first-reg
+list
+(c-registers-modified seq1)
+seq1
+c-registers-modified
+c-list-difference
+(c-list-union (list first-reg) (c-registers-needed seq1))
+(c-registers-needed seq1)
+seq1
+c-registers-needed
+(list first-reg)
+first-reg
+list
+c-list-union
+c-make-instruction-sequence
+(cdr regs)
+regs
+cdr
+preserving
+(and (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg))
+(if (c-needs-register? seq2 first-reg) (c-modifies-register? seq1 first-reg) #false)
+#false
+(c-modifies-register? seq1 first-reg)
+first-reg
+seq1
+c-modifies-register?
+(c-needs-register? seq2 first-reg)
+first-reg
+seq2
+c-needs-register?
+(append-instruction-sequences seq1 seq2)
+seq2
+seq1
+append-instruction-sequences
+(null? regs)
+regs
+null?
+(define (append-instruction-sequences . seqs) (define (append-2-sequences seq1 seq2) (c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-list-difference (c-registers-needed seq2) (c-registers-modified seq1))) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2)))) (define (append-seq-list seqs) (if (null? seqs) (c-empty-instruction-sequence) (append-2-sequences (car seqs) (append-seq-list (cdr seqs))))) (append-seq-list seqs))
+(lambda seqs (define (append-2-sequences seq1 seq2) (c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-list-difference (c-registers-needed seq2) (c-registers-modified seq1))) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2)))) (define (append-seq-list seqs) (if (null? seqs) (c-empty-instruction-sequence) (append-2-sequences (car seqs) (append-seq-list (cdr seqs))))) (append-seq-list seqs))
+(append-seq-list seqs)
+seqs
+append-seq-list
+(define (append-seq-list seqs) (if (null? seqs) (c-empty-instruction-sequence) (append-2-sequences (car seqs) (append-seq-list (cdr seqs)))))
+(lambda (seqs) (if (null? seqs) (c-empty-instruction-sequence) (append-2-sequences (car seqs) (append-seq-list (cdr seqs)))))
+(if (null? seqs) (c-empty-instruction-sequence) (append-2-sequences (car seqs) (append-seq-list (cdr seqs))))
+(append-2-sequences (car seqs) (append-seq-list (cdr seqs)))
+(append-seq-list (cdr seqs))
+(cdr seqs)
+seqs
+cdr
+append-seq-list
+(car seqs)
+seqs
+car
+append-2-sequences
+(c-empty-instruction-sequence)
+c-empty-instruction-sequence
+(null? seqs)
+seqs
+null?
+(define (append-2-sequences seq1 seq2) (c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-list-difference (c-registers-needed seq2) (c-registers-modified seq1))) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2))))
+(lambda (seq1 seq2) (c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-list-difference (c-registers-needed seq2) (c-registers-modified seq1))) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2))))
+(c-make-instruction-sequence (c-list-union (c-registers-needed seq1) (c-list-difference (c-registers-needed seq2) (c-registers-modified seq1))) (c-list-union (c-registers-modified seq1) (c-registers-modified seq2)) (c-append (c-statements seq1) (c-statements seq2)))
+(c-append (c-statements seq1) (c-statements seq2))
+(c-statements seq2)
+seq2
+c-statements
+(c-statements seq1)
+seq1
+c-statements
+c-append
+(c-list-union (c-registers-modified seq1) (c-registers-modified seq2))
+(c-registers-modified seq2)
+seq2
+c-registers-modified
+(c-registers-modified seq1)
+seq1
+c-registers-modified
+c-list-union
+(c-list-union (c-registers-needed seq1) (c-list-difference (c-registers-needed seq2) (c-registers-modified seq1)))
+(c-list-difference (c-registers-needed seq2) (c-registers-modified seq1))
+(c-registers-modified seq1)
+seq1
+c-registers-modified
+(c-registers-needed seq2)
+seq2
+c-registers-needed
+c-list-difference
+(c-registers-needed seq1)
+seq1
+c-registers-needed
+c-list-union
+c-make-instruction-sequence
+(define all-regs (quote (env proc val argl cont)))
+(quote (env proc val argl cont))
+(define (compile-proc-appl target linkage) (if (and (eq? target (quote val)) (not (eq? linkage (quote return)))) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) linkage (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (not (eq? linkage (quote return)))) ((lambda (proc-return) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|)))) (make-label (quote proc_return))) (if (and (eq? target (quote val)) (eq? linkage (quote return))) (c-make-instruction-sequence (quote (proc cont)) all-regs (quote (|object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (eq? linkage (quote return))) (error (quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|) target))))))
+(lambda (target linkage) (if (and (eq? target (quote val)) (not (eq? linkage (quote return)))) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) linkage (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (not (eq? linkage (quote return)))) ((lambda (proc-return) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|)))) (make-label (quote proc_return))) (if (and (eq? target (quote val)) (eq? linkage (quote return))) (c-make-instruction-sequence (quote (proc cont)) all-regs (quote (|object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (eq? linkage (quote return))) (error (quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|) target))))))
+(if (and (eq? target (quote val)) (not (eq? linkage (quote return)))) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) linkage (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (not (eq? linkage (quote return)))) ((lambda (proc-return) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|)))) (make-label (quote proc_return))) (if (and (eq? target (quote val)) (eq? linkage (quote return))) (c-make-instruction-sequence (quote (proc cont)) all-regs (quote (|object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (eq? linkage (quote return))) (error (quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|) target)))))
+(if (and (not (eq? target (quote val))) (not (eq? linkage (quote return)))) ((lambda (proc-return) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|)))) (make-label (quote proc_return))) (if (and (eq? target (quote val)) (eq? linkage (quote return))) (c-make-instruction-sequence (quote (proc cont)) all-regs (quote (|object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (eq? linkage (quote return))) (error (quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|) target))))
+(if (and (eq? target (quote val)) (eq? linkage (quote return))) (c-make-instruction-sequence (quote (proc cont)) all-regs (quote (|object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))) (if (and (not (eq? target (quote val))) (eq? linkage (quote return))) (error (quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|) target)))
+(if (and (not (eq? target (quote val))) (eq? linkage (quote return))) (error (quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|) target))
+#<undefined>
+(error (quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|) target)
+target
+(quote |return\x20;linkage,\x20;target\x20;not\x20;val\x20;--\x20;compile|)
+error
+(and (not (eq? target (quote val))) (eq? linkage (quote return)))
+(if (not (eq? target (quote val))) (eq? linkage (quote return)) #false)
+#false
+(eq? linkage (quote return))
+(quote return)
+linkage
+eq?
+(not (eq? target (quote val)))
+(eq? target (quote val))
+(quote val)
+target
+eq?
+not
+(c-make-instruction-sequence (quote (proc cont)) all-regs (quote (|object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|)))
+(quote (|object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))
+all-regs
+(quote (proc cont))
+c-make-instruction-sequence
+(and (eq? target (quote val)) (eq? linkage (quote return)))
+(if (eq? target (quote val)) (eq? linkage (quote return)) #false)
+#false
+(eq? linkage (quote return))
+(quote return)
+linkage
+eq?
+(eq? target (quote val))
+(quote val)
+target
+eq?
+((lambda (proc-return) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|)))) (make-label (quote proc_return)))
+(make-label (quote proc_return))
+(quote proc_return)
+make-label
+(lambda (proc-return) (c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|))))
+(c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|)))
+(list (quote |cont.cont\x20;=\x20;&&|) proc-return (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|) proc-return (quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) linkage (quote |;|))
+(quote |;|)
+linkage
+(quote |\x20;=\x20;val;\x20;val.type\x20;=\x20;NONE;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|)
+target
+(quote |);|)
+target
+(quote |:\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|)
+proc-return
+(quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|)
+proc-return
+(quote |cont.cont\x20;=\x20;&&|)
+list
+all-regs
+(quote (proc))
+c-make-instruction-sequence
+(and (not (eq? target (quote val))) (not (eq? linkage (quote return))))
+(if (not (eq? target (quote val))) (not (eq? linkage (quote return))) #false)
+#false
+(not (eq? linkage (quote return)))
+(eq? linkage (quote return))
+(quote return)
+linkage
+eq?
+not
+(not (eq? target (quote val)))
+(eq? target (quote val))
+(quote val)
+target
+eq?
+not
+(c-make-instruction-sequence (quote (proc)) all-regs (list (quote |cont.cont\x20;=\x20;&&|) linkage (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|)))
+(list (quote |cont.cont\x20;=\x20;&&|) linkage (quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|))
+(quote |;\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&val);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;val\x20;=\x20;compiled_procedure_entry(proc);\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;*val.cont;|)
+linkage
+(quote |cont.cont\x20;=\x20;&&|)
+list
+all-regs
+(quote (proc))
+c-make-instruction-sequence
+(and (eq? target (quote val)) (not (eq? linkage (quote return))))
+(if (eq? target (quote val)) (not (eq? linkage (quote return))) #false)
+#false
+(not (eq? linkage (quote return)))
+(eq? linkage (quote return))
+(quote return)
+linkage
+eq?
+not
+(eq? target (quote val))
+(quote val)
+target
+eq?
+(define (compile-procedure-call target linkage) ((lambda (primitive-branch after-call) ((lambda (compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))) (parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-call linkage))) (make-label (quote primitive_branch)) (make-label (quote after_call))))
+(lambda (target linkage) ((lambda (primitive-branch after-call) ((lambda (compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))) (parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-call linkage))) (make-label (quote primitive_branch)) (make-label (quote after_call))))
+((lambda (primitive-branch after-call) ((lambda (compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))) (parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-call linkage))) (make-label (quote primitive_branch)) (make-label (quote after_call)))
+(make-label (quote after_call))
+(quote after_call)
+make-label
+(make-label (quote primitive_branch))
+(quote primitive_branch)
+make-label
+(lambda (primitive-branch after-call) ((lambda (compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))) (parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-call linkage)))
+((lambda (compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))) (parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-call linkage))
+(if (eq? linkage (quote next)) after-call linkage)
+linkage
+after-call
+(eq? linkage (quote next))
+(quote next)
+linkage
+eq?
+(lambda (compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))) (parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence))))
+(append-instruction-sequences (c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))) (parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence)))
+(if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|))) (c-empty-instruction-sequence))
+(c-empty-instruction-sequence)
+c-empty-instruction-sequence
+(c-make-instruction-sequence (quote ()) (quote ()) (list after-call (quote |:;|)))
+(list after-call (quote |:;|))
+(quote |:;|)
+after-call
+list
+(quote ())
+(quote ())
+c-make-instruction-sequence
+(eq? linkage (quote next))
+(quote next)
+linkage
+eq?
+(parallel-instruction-sequences (compile-proc-appl target compiled-linkage) (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|))))))
+(append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|))) (end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))))
+(end-with-linkage linkage (c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|))))
+(c-make-instruction-sequence (quote (proc argl)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|)))
+(list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;proc.proc(argl);\x20;|))
+(quote |\x20;=\x20;proc.proc(argl);\x20;|)
+target
+(quote |);|)
+target
+(quote |object_free(&|)
+list
+(list target)
+target
+list
+(quote (proc argl))
+c-make-instruction-sequence
+linkage
+end-with-linkage
+(c-make-instruction-sequence (quote ()) (quote ()) (list primitive-branch (quote |:;|)))
+(list primitive-branch (quote |:;|))
+(quote |:;|)
+primitive-branch
+list
+(quote ())
+(quote ())
+c-make-instruction-sequence
+append-instruction-sequences
+(compile-proc-appl target compiled-linkage)
+compiled-linkage
+target
+compile-proc-appl
+parallel-instruction-sequences
+(c-make-instruction-sequence (quote (proc)) (quote ()) (list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|)))
+(list (quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|) primitive-branch (quote |;}|))
+(quote |;}|)
+primitive-branch
+(quote |if\x20;(proc.type\x20;==\x20;PROC_APPLY)\x20;{\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;proc\x20;=\x20;apply_proc();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;argl\x20;=\x20;apply_argl();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;}\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;if\x20;(proc.type\x20;==\x20;PROC)\x20;{\x20;goto\x20;|)
+list
+(quote ())
+(quote (proc))
+c-make-instruction-sequence
+append-instruction-sequences
+(define (code-to-get-rest-args operand-codes) ((lambda (code-for-next-arg) (if (null? (cdr operand-codes)) code-for-next-arg (preserving (quote (env)) code-for-next-arg (code-to-get-rest-args (cdr operand-codes))))) (preserving (quote (argl)) (car operand-codes) (c-make-instruction-sequence (quote (val argl)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),\x20;argl);|))))))
+(lambda (operand-codes) ((lambda (code-for-next-arg) (if (null? (cdr operand-codes)) code-for-next-arg (preserving (quote (env)) code-for-next-arg (code-to-get-rest-args (cdr operand-codes))))) (preserving (quote (argl)) (car operand-codes) (c-make-instruction-sequence (quote (val argl)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),\x20;argl);|))))))
+((lambda (code-for-next-arg) (if (null? (cdr operand-codes)) code-for-next-arg (preserving (quote (env)) code-for-next-arg (code-to-get-rest-args (cdr operand-codes))))) (preserving (quote (argl)) (car operand-codes) (c-make-instruction-sequence (quote (val argl)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),\x20;argl);|)))))
+(preserving (quote (argl)) (car operand-codes) (c-make-instruction-sequence (quote (val argl)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),\x20;argl);|))))
+(c-make-instruction-sequence (quote (val argl)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),\x20;argl);|)))
+(quote (|argl\x20;=\x20;cons(object_copy(val),\x20;argl);|))
+(quote (argl))
+(quote (val argl))
+c-make-instruction-sequence
+(car operand-codes)
+operand-codes
+car
+(quote (argl))
+preserving
+(lambda (code-for-next-arg) (if (null? (cdr operand-codes)) code-for-next-arg (preserving (quote (env)) code-for-next-arg (code-to-get-rest-args (cdr operand-codes)))))
+(if (null? (cdr operand-codes)) code-for-next-arg (preserving (quote (env)) code-for-next-arg (code-to-get-rest-args (cdr operand-codes))))
+(preserving (quote (env)) code-for-next-arg (code-to-get-rest-args (cdr operand-codes)))
+(code-to-get-rest-args (cdr operand-codes))
+(cdr operand-codes)
+operand-codes
+cdr
+code-to-get-rest-args
+code-for-next-arg
+(quote (env))
+preserving
+code-for-next-arg
+(null? (cdr operand-codes))
+(cdr operand-codes)
+operand-codes
+cdr
+null?
+(define (construct-arglist operand-codes) ((lambda (operand-codes) (if (null? operand-codes) (c-make-instruction-sequence (quote ()) (quote (argl)) (quote (|argl\x20;=\x20;empty;|))) ((lambda (code-to-get-last-arg) (if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes))))) (append-instruction-sequences (car operand-codes) (c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|))))))) (c-reverse operand-codes)))
+(lambda (operand-codes) ((lambda (operand-codes) (if (null? operand-codes) (c-make-instruction-sequence (quote ()) (quote (argl)) (quote (|argl\x20;=\x20;empty;|))) ((lambda (code-to-get-last-arg) (if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes))))) (append-instruction-sequences (car operand-codes) (c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|))))))) (c-reverse operand-codes)))
+((lambda (operand-codes) (if (null? operand-codes) (c-make-instruction-sequence (quote ()) (quote (argl)) (quote (|argl\x20;=\x20;empty;|))) ((lambda (code-to-get-last-arg) (if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes))))) (append-instruction-sequences (car operand-codes) (c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|))))))) (c-reverse operand-codes))
+(c-reverse operand-codes)
+operand-codes
+c-reverse
+(lambda (operand-codes) (if (null? operand-codes) (c-make-instruction-sequence (quote ()) (quote (argl)) (quote (|argl\x20;=\x20;empty;|))) ((lambda (code-to-get-last-arg) (if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes))))) (append-instruction-sequences (car operand-codes) (c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|)))))))
+(if (null? operand-codes) (c-make-instruction-sequence (quote ()) (quote (argl)) (quote (|argl\x20;=\x20;empty;|))) ((lambda (code-to-get-last-arg) (if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes))))) (append-instruction-sequences (car operand-codes) (c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|))))))
+((lambda (code-to-get-last-arg) (if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes))))) (append-instruction-sequences (car operand-codes) (c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|)))))
+(append-instruction-sequences (car operand-codes) (c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|))))
+(c-make-instruction-sequence (quote (val)) (quote (argl)) (quote (|argl\x20;=\x20;cons(object_copy(val),empty);|)))
+(quote (|argl\x20;=\x20;cons(object_copy(val),empty);|))
+(quote (argl))
+(quote (val))
+c-make-instruction-sequence
+(car operand-codes)
+operand-codes
+car
+append-instruction-sequences
+(lambda (code-to-get-last-arg) (if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes)))))
+(if (null? (cdr operand-codes)) code-to-get-last-arg (preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes))))
+(preserving (quote (env)) code-to-get-last-arg (code-to-get-rest-args (cdr operand-codes)))
+(code-to-get-rest-args (cdr operand-codes))
+(cdr operand-codes)
+operand-codes
+cdr
+code-to-get-rest-args
+code-to-get-last-arg
+(quote (env))
+preserving
+code-to-get-last-arg
+(null? (cdr operand-codes))
+(cdr operand-codes)
+operand-codes
+cdr
+null?
+(c-make-instruction-sequence (quote ()) (quote (argl)) (quote (|argl\x20;=\x20;empty;|)))
+(quote (|argl\x20;=\x20;empty;|))
+(quote (argl))
+(quote ())
+c-make-instruction-sequence
+(null? operand-codes)
+operand-codes
+null?
+(define (compile-application exp target linkage) (define (iter proc lst) (if (null? lst) (quote ()) (cons (proc (car lst)) (iter proc (cdr lst))))) ((lambda (proc-code operand-codes) (preserving (quote (env cont)) proc-code (preserving (quote (proc cont)) (construct-arglist operand-codes) (compile-procedure-call target linkage)))) (compile (car exp) (quote proc) (quote next)) (iter (lambda (operand) (compile operand (quote val) (quote next))) (cdr exp))))
+(lambda (exp target linkage) (define (iter proc lst) (if (null? lst) (quote ()) (cons (proc (car lst)) (iter proc (cdr lst))))) ((lambda (proc-code operand-codes) (preserving (quote (env cont)) proc-code (preserving (quote (proc cont)) (construct-arglist operand-codes) (compile-procedure-call target linkage)))) (compile (car exp) (quote proc) (quote next)) (iter (lambda (operand) (compile operand (quote val) (quote next))) (cdr exp))))
+((lambda (proc-code operand-codes) (preserving (quote (env cont)) proc-code (preserving (quote (proc cont)) (construct-arglist operand-codes) (compile-procedure-call target linkage)))) (compile (car exp) (quote proc) (quote next)) (iter (lambda (operand) (compile operand (quote val) (quote next))) (cdr exp)))
+(iter (lambda (operand) (compile operand (quote val) (quote next))) (cdr exp))
+(cdr exp)
+exp
+cdr
+(lambda (operand) (compile operand (quote val) (quote next)))
+(compile operand (quote val) (quote next))
+(quote next)
+(quote val)
+operand
+compile
+iter
+(compile (car exp) (quote proc) (quote next))
+(quote next)
+(quote proc)
+(car exp)
+exp
+car
+compile
+(lambda (proc-code operand-codes) (preserving (quote (env cont)) proc-code (preserving (quote (proc cont)) (construct-arglist operand-codes) (compile-procedure-call target linkage))))
+(preserving (quote (env cont)) proc-code (preserving (quote (proc cont)) (construct-arglist operand-codes) (compile-procedure-call target linkage)))
+(preserving (quote (proc cont)) (construct-arglist operand-codes) (compile-procedure-call target linkage))
+(compile-procedure-call target linkage)
+linkage
+target
+compile-procedure-call
+(construct-arglist operand-codes)
+operand-codes
+construct-arglist
+(quote (proc cont))
+preserving
+proc-code
+(quote (env cont))
+preserving
+(define (iter proc lst) (if (null? lst) (quote ()) (cons (proc (car lst)) (iter proc (cdr lst)))))
+(lambda (proc lst) (if (null? lst) (quote ()) (cons (proc (car lst)) (iter proc (cdr lst)))))
+(if (null? lst) (quote ()) (cons (proc (car lst)) (iter proc (cdr lst))))
+(cons (proc (car lst)) (iter proc (cdr lst)))
+(iter proc (cdr lst))
+(cdr lst)
+lst
+cdr
+proc
+iter
+(proc (car lst))
+(car lst)
+lst
+car
+proc
+cons
+(quote ())
+(null? lst)
+lst
+null?
+(define (compile-lambda-body exp proc-entry) ((lambda (formals) (append-instruction-sequences (c-make-instruction-sequence (quote (env proc argl)) (quote (env)) (c-append (list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)) (const formals) (quote (|);|)))) (compile-sequence (c-cddr exp) (quote val) (quote return)))) (c-cadr exp)))
+(lambda (exp proc-entry) ((lambda (formals) (append-instruction-sequences (c-make-instruction-sequence (quote (env proc argl)) (quote (env)) (c-append (list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)) (const formals) (quote (|);|)))) (compile-sequence (c-cddr exp) (quote val) (quote return)))) (c-cadr exp)))
+((lambda (formals) (append-instruction-sequences (c-make-instruction-sequence (quote (env proc argl)) (quote (env)) (c-append (list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)) (const formals) (quote (|);|)))) (compile-sequence (c-cddr exp) (quote val) (quote return)))) (c-cadr exp))
+(c-cadr exp)
+exp
+c-cadr
+(lambda (formals) (append-instruction-sequences (c-make-instruction-sequence (quote (env proc argl)) (quote (env)) (c-append (list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)) (const formals) (quote (|);|)))) (compile-sequence (c-cddr exp) (quote val) (quote return))))
+(append-instruction-sequences (c-make-instruction-sequence (quote (env proc argl)) (quote (env)) (c-append (list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)) (const formals) (quote (|);|)))) (compile-sequence (c-cddr exp) (quote val) (quote return)))
+(compile-sequence (c-cddr exp) (quote val) (quote return))
+(quote return)
+(quote val)
+(c-cddr exp)
+exp
+c-cddr
+compile-sequence
+(c-make-instruction-sequence (quote (env proc argl)) (quote (env)) (c-append (list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)) (const formals) (quote (|);|))))
+(c-append (list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)) (const formals) (quote (|);|)))
+(quote (|);|))
+(const formals)
+formals
+const
+(list proc-entry (quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|))
+(quote |:env\x20;=\x20;compiled_procedure_env();\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;env\x20;=\x20;extend_environment(|)
+proc-entry
+list
+c-append
+(quote (env))
+(quote (env proc argl))
+c-make-instruction-sequence
+append-instruction-sequences
+(define (compile-lambda exp target linkage) ((lambda (proc-entry after-lambda) ((lambda (lambda-linkage) (append-instruction-sequences (tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry)) (if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-lambda linkage))) (make-label (quote entry)) (make-label (quote after_lambda))))
+(lambda (exp target linkage) ((lambda (proc-entry after-lambda) ((lambda (lambda-linkage) (append-instruction-sequences (tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry)) (if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-lambda linkage))) (make-label (quote entry)) (make-label (quote after_lambda))))
+((lambda (proc-entry after-lambda) ((lambda (lambda-linkage) (append-instruction-sequences (tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry)) (if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-lambda linkage))) (make-label (quote entry)) (make-label (quote after_lambda)))
+(make-label (quote after_lambda))
+(quote after_lambda)
+make-label
+(make-label (quote entry))
+(quote entry)
+make-label
+(lambda (proc-entry after-lambda) ((lambda (lambda-linkage) (append-instruction-sequences (tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry)) (if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-lambda linkage)))
+((lambda (lambda-linkage) (append-instruction-sequences (tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry)) (if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence)))) (if (eq? linkage (quote next)) after-lambda linkage))
+(if (eq? linkage (quote next)) after-lambda linkage)
+linkage
+after-lambda
+(eq? linkage (quote next))
+(quote next)
+linkage
+eq?
+(lambda (lambda-linkage) (append-instruction-sequences (tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry)) (if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence))))
+(append-instruction-sequences (tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry)) (if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence)))
+(if (eq? lambda-linkage after-lambda) (c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|))) (c-empty-instruction-sequence))
+(c-empty-instruction-sequence)
+c-empty-instruction-sequence
+(c-make-instruction-sequence (quote ()) (quote ()) (list after-lambda (quote |:;|)))
+(list after-lambda (quote |:;|))
+(quote |:;|)
+after-lambda
+list
+(quote ())
+(quote ())
+c-make-instruction-sequence
+(eq? lambda-linkage after-lambda)
+after-lambda
+lambda-linkage
+eq?
+(tack-on-instruction-sequence (end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))) (compile-lambda-body exp proc-entry))
+(compile-lambda-body exp proc-entry)
+proc-entry
+exp
+compile-lambda-body
+(end-with-linkage lambda-linkage (c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|))))
+(c-make-instruction-sequence (quote (env)) (list target) (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|)))
+(list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;make_compiled_procedure(&&|) proc-entry (quote |);|))
+(quote |);|)
+proc-entry
+(quote |\x20;=\x20;make_compiled_procedure(&&|)
+target
+(quote |);|)
+target
+(quote |object_free(&|)
+list
+(list target)
+target
+list
+(quote (env))
+c-make-instruction-sequence
+lambda-linkage
+end-with-linkage
+tack-on-instruction-sequence
+append-instruction-sequences
+(define (compile-sequence seq target linkage) (if (null? (cdr seq)) (compile (car seq) target linkage) (preserving (quote (env cont)) (compile (car seq) target (quote next)) (compile-sequence (cdr seq) target linkage))))
+(lambda (seq target linkage) (if (null? (cdr seq)) (compile (car seq) target linkage) (preserving (quote (env cont)) (compile (car seq) target (quote next)) (compile-sequence (cdr seq) target linkage))))
+(if (null? (cdr seq)) (compile (car seq) target linkage) (preserving (quote (env cont)) (compile (car seq) target (quote next)) (compile-sequence (cdr seq) target linkage)))
+(preserving (quote (env cont)) (compile (car seq) target (quote next)) (compile-sequence (cdr seq) target linkage))
+(compile-sequence (cdr seq) target linkage)
+linkage
+target
+(cdr seq)
+seq
+cdr
+compile-sequence
+(compile (car seq) target (quote next))
+(quote next)
+target
+(car seq)
+seq
+car
+compile
+(quote (env cont))
+preserving
+(compile (car seq) target linkage)
+linkage
+target
+(car seq)
+seq
+car
+compile
+(null? (cdr seq))
+(cdr seq)
+seq
+cdr
+null?
+(define (compile-if exp target linkage) ((lambda (f-branch after-if) ((lambda (consequent-linkage) ((lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))) (compile (c-cadr exp) (quote val) (quote next)) (compile (c-caddr exp) target consequent-linkage) (compile (c-if-alternative exp) target linkage))) (if (eq? linkage (quote next)) after-if linkage))) (make-label (quote false_branch)) (make-label (quote after_if))))
+(lambda (exp target linkage) ((lambda (f-branch after-if) ((lambda (consequent-linkage) ((lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))) (compile (c-cadr exp) (quote val) (quote next)) (compile (c-caddr exp) target consequent-linkage) (compile (c-if-alternative exp) target linkage))) (if (eq? linkage (quote next)) after-if linkage))) (make-label (quote false_branch)) (make-label (quote after_if))))
+((lambda (f-branch after-if) ((lambda (consequent-linkage) ((lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))) (compile (c-cadr exp) (quote val) (quote next)) (compile (c-caddr exp) target consequent-linkage) (compile (c-if-alternative exp) target linkage))) (if (eq? linkage (quote next)) after-if linkage))) (make-label (quote false_branch)) (make-label (quote after_if)))
+(make-label (quote after_if))
+(quote after_if)
+make-label
+(make-label (quote false_branch))
+(quote false_branch)
+make-label
+(lambda (f-branch after-if) ((lambda (consequent-linkage) ((lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))) (compile (c-cadr exp) (quote val) (quote next)) (compile (c-caddr exp) target consequent-linkage) (compile (c-if-alternative exp) target linkage))) (if (eq? linkage (quote next)) after-if linkage)))
+((lambda (consequent-linkage) ((lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))) (compile (c-cadr exp) (quote val) (quote next)) (compile (c-caddr exp) target consequent-linkage) (compile (c-if-alternative exp) target linkage))) (if (eq? linkage (quote next)) after-if linkage))
+(if (eq? linkage (quote next)) after-if linkage)
+linkage
+after-if
+(eq? linkage (quote next))
+(quote next)
+linkage
+eq?
+(lambda (consequent-linkage) ((lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))) (compile (c-cadr exp) (quote val) (quote next)) (compile (c-caddr exp) target consequent-linkage) (compile (c-if-alternative exp) target linkage)))
+((lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))) (compile (c-cadr exp) (quote val) (quote next)) (compile (c-caddr exp) target consequent-linkage) (compile (c-if-alternative exp) target linkage))
+(compile (c-if-alternative exp) target linkage)
+linkage
+target
+(c-if-alternative exp)
+exp
+c-if-alternative
+compile
+(compile (c-caddr exp) target consequent-linkage)
+consequent-linkage
+target
+(c-caddr exp)
+exp
+c-caddr
+compile
+(compile (c-cadr exp) (quote val) (quote next))
+(quote next)
+(quote val)
+(c-cadr exp)
+exp
+c-cadr
+compile
+(lambda (p-code c-code a-code) (preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence)))))
+(preserving (quote (env cont)) p-code (append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))))
+(append-instruction-sequences (c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))) (parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)) (if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence)))
+(if (eq? linkage (quote next)) (c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|))) (c-empty-instruction-sequence))
+(c-empty-instruction-sequence)
+c-empty-instruction-sequence
+(c-make-instruction-sequence (quote ()) (quote ()) (list after-if (quote |:;|)))
+(list after-if (quote |:;|))
+(quote |:;|)
+after-if
+list
+(quote ())
+(quote ())
+c-make-instruction-sequence
+(eq? linkage (quote next))
+(quote next)
+linkage
+eq?
+(parallel-instruction-sequences c-code (append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code))
+(append-instruction-sequences (c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|))) a-code)
+a-code
+(c-make-instruction-sequence (quote ()) (quote ()) (list f-branch (quote |:;|)))
+(list f-branch (quote |:;|))
+(quote |:;|)
+f-branch
+list
+(quote ())
+(quote ())
+c-make-instruction-sequence
+append-instruction-sequences
+c-code
+parallel-instruction-sequences
+(c-make-instruction-sequence (quote (val)) (quote ()) (list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|)))
+(list (quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|) f-branch (quote |;}|))
+(quote |;}|)
+f-branch
+(quote |if(val.type==BOOLEAN\x20;&&\x20;!val.boolean){\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;goto\x20;|)
+list
+(quote ())
+(quote (val))
+c-make-instruction-sequence
+append-instruction-sequences
+p-code
+(quote (env cont))
+preserving
+(define (compile-definition exp target linkage) ((lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))) (c-definition-variable exp) (compile (definition-value exp) (quote val) (quote next))))
+(lambda (exp target linkage) ((lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))) (c-definition-variable exp) (compile (definition-value exp) (quote val) (quote next))))
+((lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))) (c-definition-variable exp) (compile (definition-value exp) (quote val) (quote next)))
+(compile (definition-value exp) (quote val) (quote next))
+(quote next)
+(quote val)
+(definition-value exp)
+exp
+definition-value
+compile
+(c-definition-variable exp)
+exp
+c-definition-variable
+(lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|)))))))
+(end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))
+(preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|)))))
+(c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))
+(c-append (quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|)))
+(list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))
+(quote |\x20;=\x20;t;}|)
+target
+(quote |);|)
+target
+(quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|)
+list
+(c-symbol->c var)
+var
+c-symbol->c
+(quote (|{Object\x20;t\x20;=\x20;def_var_val(c_str_to_datum("|))
+c-append
+(list target)
+target
+list
+(quote (env val))
+c-make-instruction-sequence
+get-value-code
+(quote (env))
+preserving
+linkage
+end-with-linkage
+(define (compile-assignment exp target linkage) ((lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))) (c-cadr exp) (compile (c-caddr exp) (quote val) (quote next))))
+(lambda (exp target linkage) ((lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))) (c-cadr exp) (compile (c-caddr exp) (quote val) (quote next))))
+((lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))) (c-cadr exp) (compile (c-caddr exp) (quote val) (quote next)))
+(compile (c-caddr exp) (quote val) (quote next))
+(quote next)
+(quote val)
+(c-caddr exp)
+exp
+c-caddr
+compile
+(c-cadr exp)
+exp
+c-cadr
+(lambda (var get-value-code) (end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|)))))))
+(end-with-linkage linkage (preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))))
+(preserving (quote (env)) get-value-code (c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|)))))
+(c-make-instruction-sequence (quote (env val)) (list target) (c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))))
+(c-append (quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|)) (c-symbol->c var) (list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|)))
+(list (quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|) target (quote |);|) target (quote |\x20;=\x20;t;}|))
+(quote |\x20;=\x20;t;}|)
+target
+(quote |);|)
+target
+(quote |"));\n\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;\x20;object_free(&|)
+list
+(c-symbol->c var)
+var
+c-symbol->c
+(quote (|{Object\x20;t\x20;=\x20;set_var_val(c_str_to_datum("|))
+c-append
+(list target)
+target
+list
+(quote (env val))
+c-make-instruction-sequence
+get-value-code
+(quote (env))
+preserving
+linkage
+end-with-linkage
+(define (compile-quoted exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const (c-cadr exp)) (quote (|;|))))))
+(lambda (exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const (c-cadr exp)) (quote (|;|))))))
+(end-with-linkage linkage (c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const (c-cadr exp)) (quote (|;|)))))
+(c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const (c-cadr exp)) (quote (|;|))))
+(c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const (c-cadr exp)) (quote (|;|)))
+(quote (|;|))
+(const (c-cadr exp))
+(c-cadr exp)
+exp
+c-cadr
+const
+(list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|))
+(quote |\x20;=\x20;|)
+target
+(quote |);|)
+target
+(quote |object_free(&|)
+list
+c-append
+(list target)
+target
+list
+(quote ())
+c-make-instruction-sequence
+linkage
+end-with-linkage
+(define (compile-variable exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote (env)) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;lookup_var_val(c_str_to_datum("|)) (c-symbol->c exp) (quote (|"));|))))))
+(lambda (exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote (env)) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;lookup_var_val(c_str_to_datum("|)) (c-symbol->c exp) (quote (|"));|))))))
+(end-with-linkage linkage (c-make-instruction-sequence (quote (env)) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;lookup_var_val(c_str_to_datum("|)) (c-symbol->c exp) (quote (|"));|)))))
+(c-make-instruction-sequence (quote (env)) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;lookup_var_val(c_str_to_datum("|)) (c-symbol->c exp) (quote (|"));|))))
+(c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;lookup_var_val(c_str_to_datum("|)) (c-symbol->c exp) (quote (|"));|)))
+(quote (|"));|))
+(c-symbol->c exp)
+exp
+c-symbol->c
+(list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;lookup_var_val(c_str_to_datum("|))
+(quote |\x20;=\x20;lookup_var_val(c_str_to_datum("|)
+target
+(quote |);|)
+target
+(quote |object_free(&|)
+list
+c-append
+(list target)
+target
+list
+(quote (env))
+c-make-instruction-sequence
+linkage
+end-with-linkage
+(define (compile-self-evaluating exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const exp) (quote (|;|))))))
+(lambda (exp target linkage) (end-with-linkage linkage (c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const exp) (quote (|;|))))))
+(end-with-linkage linkage (c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const exp) (quote (|;|)))))
+(c-make-instruction-sequence (quote ()) (list target) (c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const exp) (quote (|;|))))
+(c-append (list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|)) (const exp) (quote (|;|)))
+(quote (|;|))
+(const exp)
+exp
+const
+(list (quote |object_free(&|) target (quote |);|) target (quote |\x20;=\x20;|))
+(quote |\x20;=\x20;|)
+target
+(quote |);|)
+target
+(quote |object_free(&|)
+list
+c-append
+(list target)
+target
+list
+(quote ())
+c-make-instruction-sequence
+linkage
+end-with-linkage
+(define (end-with-linkage linkage instruction-sequence) (preserving (quote (cont)) instruction-sequence (compile-linkage linkage)))
+(lambda (linkage instruction-sequence) (preserving (quote (cont)) instruction-sequence (compile-linkage linkage)))
+(preserving (quote (cont)) instruction-sequence (compile-linkage linkage))
+(compile-linkage linkage)
+linkage
+compile-linkage
+instruction-sequence
+(quote (cont))
+preserving
+(define (compile-linkage linkage) (if (eq? linkage (quote return)) (c-make-instruction-sequence (quote (cont)) (quote ()) (quote (|goto\x20;*cont.cont;|))) (if (eq? linkage (quote next)) (c-empty-instruction-sequence) (c-make-instruction-sequence (quote ()) (quote ()) (list (quote |goto\x20;|) linkage (quote |;|))))))
+(lambda (linkage) (if (eq? linkage (quote return)) (c-make-instruction-sequence (quote (cont)) (quote ()) (quote (|goto\x20;*cont.cont;|))) (if (eq? linkage (quote next)) (c-empty-instruction-sequence) (c-make-instruction-sequence (quote ()) (quote ()) (list (quote |goto\x20;|) linkage (quote |;|))))))
+(if (eq? linkage (quote return)) (c-make-instruction-sequence (quote (cont)) (quote ()) (quote (|goto\x20;*cont.cont;|))) (if (eq? linkage (quote next)) (c-empty-instruction-sequence) (c-make-instruction-sequence (quote ()) (quote ()) (list (quote |goto\x20;|) linkage (quote |;|)))))
+(if (eq? linkage (quote next)) (c-empty-instruction-sequence) (c-make-instruction-sequence (quote ()) (quote ()) (list (quote |goto\x20;|) linkage (quote |;|))))
+(c-make-instruction-sequence (quote ()) (quote ()) (list (quote |goto\x20;|) linkage (quote |;|)))
+(list (quote |goto\x20;|) linkage (quote |;|))
+(quote |;|)
+linkage
+(quote |goto\x20;|)
+list
+(quote ())
+(quote ())
+c-make-instruction-sequence
+(c-empty-instruction-sequence)
+c-empty-instruction-sequence
+(eq? linkage (quote next))
+(quote next)
+linkage
+eq?
+(c-make-instruction-sequence (quote (cont)) (quote ()) (quote (|goto\x20;*cont.cont;|)))
+(quote (|goto\x20;*cont.cont;|))
+(quote ())
+(quote (cont))
+c-make-instruction-sequence
+(eq? linkage (quote return))
+(quote return)
+linkage
+eq?
+(define (compile exp target linkage) (display exp log-port) (newline log-port) (if (c-self-evaluating? exp) (compile-self-evaluating exp target linkage) (if (symbol? exp) (compile-variable exp target linkage) (if (pair? exp) ((lambda (o) (if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage))) (car exp)) (error (quote |unknown\x20;expression\x20;type\x20;--\x20;compile|) exp)))))
+(lambda (exp target linkage) (display exp log-port) (newline log-port) (if (c-self-evaluating? exp) (compile-self-evaluating exp target linkage) (if (symbol? exp) (compile-variable exp target linkage) (if (pair? exp) ((lambda (o) (if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage))) (car exp)) (error (quote |unknown\x20;expression\x20;type\x20;--\x20;compile|) exp)))))
+(if (c-self-evaluating? exp) (compile-self-evaluating exp target linkage) (if (symbol? exp) (compile-variable exp target linkage) (if (pair? exp) ((lambda (o) (if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage))) (car exp)) (error (quote |unknown\x20;expression\x20;type\x20;--\x20;compile|) exp))))
+(if (symbol? exp) (compile-variable exp target linkage) (if (pair? exp) ((lambda (o) (if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage))) (car exp)) (error (quote |unknown\x20;expression\x20;type\x20;--\x20;compile|) exp)))
+(if (pair? exp) ((lambda (o) (if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage))) (car exp)) (error (quote |unknown\x20;expression\x20;type\x20;--\x20;compile|) exp))
+(error (quote |unknown\x20;expression\x20;type\x20;--\x20;compile|) exp)
+exp
+(quote |unknown\x20;expression\x20;type\x20;--\x20;compile|)
+error
+((lambda (o) (if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage))) (car exp))
+(car exp)
+exp
+car
+(lambda (o) (if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage)))
+(if (symbol? o) (if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))) (compile-application exp target linkage))
+(compile-application exp target linkage)
+linkage
+target
+exp
+compile-application
+(if (eq? o (quote quote)) (compile-quoted exp target linkage) (if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage)))))))))
+(if (eq? o (quote lambda)) (compile-lambda exp target linkage) (if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))))
+(if (eq? o (quote set!)) (compile-assignment exp target linkage) (if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage)))))))
+(if (eq? o (quote define)) (compile-definition exp target linkage) (if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))))
+(if (eq? o (quote if)) (compile-if exp target linkage) (if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage)))))
+(if (eq? o (quote begin)) (compile-sequence (cdr exp) target linkage) (if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))))
+(if (eq? o (quote and)) (compile (and->if (cdr exp)) target linkage) (if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage)))
+(if (eq? o (quote or)) (compile (or->if (cdr exp)) target linkage) (compile-application exp target linkage))
+(compile-application exp target linkage)
+linkage
+target
+exp
+compile-application
+(compile (or->if (cdr exp)) target linkage)
+linkage
+target
+(or->if (cdr exp))
+(cdr exp)
+exp
+cdr
+or->if
+compile
+(eq? o (quote or))
+(quote or)
+o
+eq?
+(compile (and->if (cdr exp)) target linkage)
+linkage
+target
+(and->if (cdr exp))
+(cdr exp)
+exp
+cdr
+and->if
+compile
+(eq? o (quote and))
+(quote and)
+o
+eq?
+(compile-sequence (cdr exp) target linkage)
+linkage
+target
+(cdr exp)
+exp
+cdr
+compile-sequence
+(eq? o (quote begin))
+(quote begin)
+o
+eq?
+(compile-if exp target linkage)
+linkage
+target
+exp
+compile-if
+(eq? o (quote if))
+(quote if)
+o
+eq?
+(compile-definition exp target linkage)
+linkage
+target
+exp
+compile-definition
+(eq? o (quote define))
+(quote define)
+o
+eq?
+(compile-assignment exp target linkage)
+linkage
+target
+exp
+compile-assignment
+(eq? o (quote set!))
+(quote set!)
+o
+eq?
+(compile-lambda exp target linkage)
+linkage
+target
+exp
+compile-lambda
+(eq? o (quote lambda))
+(quote lambda)
+o
+eq?
+(compile-quoted exp target linkage)
+linkage
+target
+exp
+compile-quoted
+(eq? o (quote quote))
+(quote quote)
+o
+eq?
+(symbol? o)
+o
+symbol?
+(pair? exp)
+exp
+pair?
+(compile-variable exp target linkage)
+linkage
+target
+exp
+compile-variable
+(symbol? exp)
+exp
+symbol?
+(compile-self-evaluating exp target linkage)
+linkage
+target
+exp
+compile-self-evaluating
+(c-self-evaluating? exp)
+exp
+c-self-evaluating?
+(newline log-port)
+log-port
+newline
+(display exp log-port)
+log-port
+exp
+display
+(define log-port (open-output-file "compiler.log"))
+(open-output-file "compiler.log")
+compiler.log
+open-output-file
+(define (or->if exp) (if (null? exp) (quote #false) (list (quote if) (car exp) (car exp) (cons (quote or) (cdr exp)))))
+(lambda (exp) (if (null? exp) (quote #false) (list (quote if) (car exp) (car exp) (cons (quote or) (cdr exp)))))
+(if (null? exp) (quote #false) (list (quote if) (car exp) (car exp) (cons (quote or) (cdr exp))))
+(list (quote if) (car exp) (car exp) (cons (quote or) (cdr exp)))
+(cons (quote or) (cdr exp))
+(cdr exp)
+exp
+cdr
+(quote or)
+cons
+(car exp)
+exp
+car
+(car exp)
+exp
+car
+(quote if)
+list
+(quote #false)
+(null? exp)
+exp
+null?
+(define (and->if exp) (if (null? exp) #true (begin (define (iter o) (if (null? (cdr o)) (car o) (list (quote if) (car o) (iter (cdr o)) (quote #false)))) (iter exp))))
+(lambda (exp) (if (null? exp) #true (begin (define (iter o) (if (null? (cdr o)) (car o) (list (quote if) (car o) (iter (cdr o)) (quote #false)))) (iter exp))))
+(if (null? exp) #true (begin (define (iter o) (if (null? (cdr o)) (car o) (list (quote if) (car o) (iter (cdr o)) (quote #false)))) (iter exp)))
+(begin (define (iter o) (if (null? (cdr o)) (car o) (list (quote if) (car o) (iter (cdr o)) (quote #false)))) (iter exp))
+(iter exp)
+exp
+iter
+(define (iter o) (if (null? (cdr o)) (car o) (list (quote if) (car o) (iter (cdr o)) (quote #false))))
+(lambda (o) (if (null? (cdr o)) (car o) (list (quote if) (car o) (iter (cdr o)) (quote #false))))
+(if (null? (cdr o)) (car o) (list (quote if) (car o) (iter (cdr o)) (quote #false)))
+(list (quote if) (car o) (iter (cdr o)) (quote #false))
+(quote #false)
+(iter (cdr o))
+(cdr o)
+o
+cdr
+iter
+(car o)
+o
+car
+(quote if)
+list
+(car o)
+o
+car
+(null? (cdr o))
+(cdr o)
+o
+cdr
+null?
+#true
+(null? exp)
+exp
+null?
+(define (definition-value exp) (if (symbol? (c-cadr exp)) (c-caddr exp) (c-make-lambda (c-cdadr exp) (c-cddr exp))))
+(lambda (exp) (if (symbol? (c-cadr exp)) (c-caddr exp) (c-make-lambda (c-cdadr exp) (c-cddr exp))))
+(if (symbol? (c-cadr exp)) (c-caddr exp) (c-make-lambda (c-cdadr exp) (c-cddr exp)))
+(c-make-lambda (c-cdadr exp) (c-cddr exp))
+(c-cddr exp)
+exp
+c-cddr
+(c-cdadr exp)
+exp
+c-cdadr
+c-make-lambda
+(c-caddr exp)
+exp
+c-caddr
+(symbol? (c-cadr exp))
+(c-cadr exp)
+exp
+c-cadr
+symbol?
+(define (const obj) (if (eq? obj undef) (quote (undef)) (if (eof-object? obj) (quote (eof_obj)) (c-append (quote (|c_str_to_datum("|)) (obj->c obj) (quote (|")|))))))
+(lambda (obj) (if (eq? obj undef) (quote (undef)) (if (eof-object? obj) (quote (eof_obj)) (c-append (quote (|c_str_to_datum("|)) (obj->c obj) (quote (|")|))))))
+(if (eq? obj undef) (quote (undef)) (if (eof-object? obj) (quote (eof_obj)) (c-append (quote (|c_str_to_datum("|)) (obj->c obj) (quote (|")|)))))
+(if (eof-object? obj) (quote (eof_obj)) (c-append (quote (|c_str_to_datum("|)) (obj->c obj) (quote (|")|))))
+(c-append (quote (|c_str_to_datum("|)) (obj->c obj) (quote (|")|)))
+(quote (|")|))
+(obj->c obj)
+obj
+obj->c
+(quote (|c_str_to_datum("|))
+c-append
+(quote (eof_obj))
+(eof-object? obj)
+obj
+eof-object?
+(quote (undef))
+(eq? obj undef)
+undef
+obj
+eq?
+(define (obj->c obj) (if (number? obj) (list obj) (if (string? obj) (c-string->c obj) (if (symbol? obj) (c-symbol->c obj) (if (pair? obj) (pair->c obj) (if (null? obj) (quote (|()|)) (if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj)))))))))
+(lambda (obj) (if (number? obj) (list obj) (if (string? obj) (c-string->c obj) (if (symbol? obj) (c-symbol->c obj) (if (pair? obj) (pair->c obj) (if (null? obj) (quote (|()|)) (if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj)))))))))
+(if (number? obj) (list obj) (if (string? obj) (c-string->c obj) (if (symbol? obj) (c-symbol->c obj) (if (pair? obj) (pair->c obj) (if (null? obj) (quote (|()|)) (if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj))))))))
+(if (string? obj) (c-string->c obj) (if (symbol? obj) (c-symbol->c obj) (if (pair? obj) (pair->c obj) (if (null? obj) (quote (|()|)) (if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj)))))))
+(if (symbol? obj) (c-symbol->c obj) (if (pair? obj) (pair->c obj) (if (null? obj) (quote (|()|)) (if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj))))))
+(if (pair? obj) (pair->c obj) (if (null? obj) (quote (|()|)) (if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj)))))
+(if (null? obj) (quote (|()|)) (if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj))))
+(if (boolean? obj) (list obj) (if (char? obj) (c-char->c obj)))
+(if (char? obj) (c-char->c obj))
+#<undefined>
+(c-char->c obj)
+obj
+c-char->c
+(char? obj)
+obj
+char?
+(list obj)
+obj
+list
+(boolean? obj)
+obj
+boolean?
+(quote (|()|))
+(null? obj)
+obj
+null?
+(pair->c obj)
+obj
+pair->c
+(pair? obj)
+obj
+pair?
+(c-symbol->c obj)
+obj
+c-symbol->c
+(symbol? obj)
+obj
+symbol?
+(c-string->c obj)
+obj
+c-string->c
+(string? obj)
+obj
+string?
+(list obj)
+obj
+list
+(number? obj)
+obj
+number?
+(define (pair->c obj) (c-append (quote (|(|)) (obj->c (car obj)) (quote (|\x20;.\x20;|)) (obj->c (cdr obj)) (quote (|)|))))
+(lambda (obj) (c-append (quote (|(|)) (obj->c (car obj)) (quote (|\x20;.\x20;|)) (obj->c (cdr obj)) (quote (|)|))))
+(c-append (quote (|(|)) (obj->c (car obj)) (quote (|\x20;.\x20;|)) (obj->c (cdr obj)) (quote (|)|)))
+(quote (|)|))
+(obj->c (cdr obj))
+(cdr obj)
+obj
+cdr
+obj->c
+(quote (|\x20;.\x20;|))
+(obj->c (car obj))
+(car obj)
+obj
+car
+obj->c
+(quote (|(|))
+c-append
+(define undef (if #false 0))
+(if #false 0)
+#<undefined>
+0
+#false
+(define (print-code code port) (display (quote |/**\x20;\x5c;file\x20;*/|) port) (newline port) (display (quote |#include\x20;<kscm.h>|) port) (newline port) (display (quote |int\x20;main\x20;(int\x20;argc,char\x20;*argv[]){init();get_command_line(argc,\x20;argv);|) port) (print-elements (c-caddr code) port) (display (quote |printf("=>\x20;");object_write_stdout(val);puts("");}|) port))
+(lambda (code port) (display (quote |/**\x20;\x5c;file\x20;*/|) port) (newline port) (display (quote |#include\x20;<kscm.h>|) port) (newline port) (display (quote |int\x20;main\x20;(int\x20;argc,char\x20;*argv[]){init();get_command_line(argc,\x20;argv);|) port) (print-elements (c-caddr code) port) (display (quote |printf("=>\x20;");object_write_stdout(val);puts("");}|) port))
+(display (quote |printf("=>\x20;");object_write_stdout(val);puts("");}|) port)
+port
+(quote |printf("=>\x20;");object_write_stdout(val);puts("");}|)
+display
+(print-elements (c-caddr code) port)
+port
+(c-caddr code)
+code
+c-caddr
+print-elements
+(display (quote |int\x20;main\x20;(int\x20;argc,char\x20;*argv[]){init();get_command_line(argc,\x20;argv);|) port)
+port
+(quote |int\x20;main\x20;(int\x20;argc,char\x20;*argv[]){init();get_command_line(argc,\x20;argv);|)
+display
+(newline port)
+port
+newline
+(display (quote |#include\x20;<kscm.h>|) port)
+port
+(quote |#include\x20;<kscm.h>|)
+display
+(newline port)
+port
+newline
+(display (quote |/**\x20;\x5c;file\x20;*/|) port)
+port
+(quote |/**\x20;\x5c;file\x20;*/|)
+display
+(define (print-elements list port) (if (not (null? list)) (begin (display (car list) port) (print-elements (cdr list) port))))
+(lambda (list port) (if (not (null? list)) (begin (display (car list) port) (print-elements (cdr list) port))))
+(if (not (null? list)) (begin (display (car list) port) (print-elements (cdr list) port)))
+#<undefined>
+(begin (display (car list) port) (print-elements (cdr list) port))
+(print-elements (cdr list) port)
+port
+(cdr list)
+list
+cdr
+print-elements
+(display (car list) port)
+port
+(car list)
+list
+car
+display
+(not (null? list))
+(null? list)
+list
+null?
+not
+(define (newline port) (display #\newline port))
+(lambda (port) (display #\newline port))
+(display #\newline port)
+port
+
+
+display

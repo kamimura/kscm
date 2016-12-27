@@ -1,0 +1,1111 @@
+((lambda () (define (eval exp env) ((analyze exp) env)) (define (analyze exp) (if (eof-object? exp) (exit) (if (self-evaluating? exp) (analyze-self-evaluating exp) (if (variable? exp) (analyze-variable exp) (if (quoted? exp) (analyze-quoted exp) (if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp)))))))))))) (define (analyze-self-evaluating exp) (lambda (env) exp)) (define (analyze-variable exp) (lambda (env) (lookup-variable-value exp env))) (define (analyze-quoted exp) ((lambda (qval) (lambda (env) qval)) (text-of-quotation exp))) (define (analyze-lambda exp) ((lambda (vars bproc) (lambda (env) (make-procedure vars bproc env))) (lambda-parameters exp) (analyze-sequence (lambda-body exp)))) (define (analyze-definition exp) ((lambda (var vproc) (lambda (env) (define-variable! var (vproc env) env))) (definition-variable exp) (analyze (definition-value exp)))) (define (analyze-assignment exp) ((lambda (var vproc) (lambda (env) (set-variable-value! var (vproc env) env))) (assignment-variable exp) (analyze (assignment-value exp)))) (define (analyze-if exp) ((lambda (pproc cproc aproc) (lambda (env) (if (pproc env) (cproc env) (aproc env)))) (analyze (if-predicate exp)) (analyze (if-consequent exp)) (analyze (if-alternative exp)))) (define (map proc list) (if (null? list) (quote ()) (cons (proc (car list)) (map proc (cdr list))))) (define (analyze-sequence exps) (define (sequentially proc1 proc2) (lambda (env) (proc1 env) (proc2 env))) (define (loop first-proc rest-procs) (if (null? rest-procs) first-proc (loop (sequentially first-proc (car rest-procs)) (cdr rest-procs)))) ((lambda (procs) (if (null? procs) (error "empty sequence -- analyze")) (loop (car procs) (cdr procs))) (map analyze exps))) (define (analyze-application exp) ((lambda (pproc aprocs) (lambda (env) (execute-application (pproc env) (map (lambda (aproc) (aproc env)) aprocs)))) (analyze (operator exp)) (map analyze (operands exp)))) (define (execute-application proc args) (if (primitive-procedure? proc) (c-apply (primitive-implementation proc) args) (if (compound-procedure? proc) ((procedure-body proc) (extend-environment (procedure-parameters proc) args (procedure-environment proc))) (error "unknown procedure type -- execute-application" proc)))) (define (self-evaluating? exp) (or (boolean? exp) (number? exp) (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ()))))) (define (variable? exp) (symbol? exp)) (define (quoted? exp) (tagged-list? exp (quote quote))) (define (text-of-quotation exp) (car (cdr exp))) (define (tagged-list? exp tag) (if (pair? exp) (eq? (car exp) tag) #false)) (define (lambda? exp) (tagged-list? exp (quote lambda))) (define (lambda-parameters exp) (car (cdr exp))) (define (lambda-body exp) (cdr (cdr exp))) (define (make-lambda parameters body) (cons (quote lambda) (cons parameters body))) (define (if? exp) (tagged-list? exp (quote if))) (define (if-predicate exp) (car (cdr exp))) (define (if-consequent exp) (car (cdr (cdr exp)))) (define (if-alternative exp) (if (not (null? (cdr (cdr (cdr exp))))) (car (cdr (cdr (cdr exp)))))) (define (begin? exp) (tagged-list? exp (quote begin))) (define (begin-actions exp) (cdr exp)) (define (application? exp) (pair? exp)) (define (operator exp) (car exp)) (define (operands exp) (cdr exp)) (define (definition? exp) (tagged-list? exp (quote define))) (define (definition-variable exp) (if (symbol? (car (cdr exp))) (car (cdr exp)) (car (car (cdr exp))))) (define (definition-value exp) (if (symbol? (car (cdr exp))) (car (cdr (cdr exp))) (make-lambda (cdr (car (cdr exp))) (cdr (cdr exp))))) (define (assignment? exp) (tagged-list? exp (quote set!))) (define (assignment-variable exp) (car (cdr exp))) (define (assignment-value exp) (car (cdr (cdr exp)))) (define (first-frame env) (car env)) (define the-empty-environment (quote ())) (define (make-frame variables values) (cons variables values)) (define (frame-variables frame) (car frame)) (define (frame-values frame) (cdr frame)) (define (add-binding-to-frame! var val frame) (set-car! frame (cons var (car frame))) (set-cdr! frame (cons val (cdr frame)))) (define (define-variable! var val env) ((lambda (frame) (define (scan vars vals) (if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (scan (frame-variables frame) (frame-values frame))) (first-frame env))) (define (set-variable-value! var val env) (define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "(set!) unbound variable --" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))) (env-loop env)) (define (make-procedure parameters body env) (list (quote procedure) parameters body env)) (define (compound-procedure? p) (tagged-list? p (quote procedure))) (define (procedure-parameters p) (car (cdr p))) (define (procedure-body p) (car (cdr (cdr p)))) (define (procedure-environment p) (car (cdr (cdr (cdr p))))) (define (enclosing-environment env) (cdr env)) (define (extend-environment vars vals base-env) (define (iter vars-0 vals-0 vars-1 vals-1) (if (symbol? vars-0) (cons (make-frame (cons vars-0 vars-1) (cons vals-0 vals-1)) base-env) (if (null? vars-0) (if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals)) (if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1)))))) (iter vars vals (quote ()) (quote ()))) (define (lookup-variable-value var env) (define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "unbound variable" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))) (env-loop env)) (define (primitive-procedure? proc) (tagged-list? proc (quote primitive))) (define (primitive-implementation proc) (car (cdr proc))) (define primitive-procedures (list (list (quote car) car) (list (quote cdr) cdr) (list (quote cons) cons))) (define (primitive-procedure-names) (map car primitive-procedures)) (define (primitive-procedure-objects) (map (lambda (proc) (list (quote primitive) (car (cdr proc)))) primitive-procedures)) (define (setup-environment) ((lambda (initial-env) (define-variable! (quote quote) quote initial-env) (define-variable! (quote lambda) lambda initial-env) (define-variable! (quote define) define initial-env) (define-variable! (quote set!) set! initial-env) (define-variable! (quote if) if initial-env) (define-variable! (quote begin) begin initial-env) initial-env) (extend-environment (primitive-procedure-names) (primitive-procedure-objects) the-empty-environment))) (define the-global-environment (setup-environment)) (define input-prompt "> ") (define output-prompt "=> ") (define input-port (current-input-port)) (define output-port (current-output-port)) (define (driver-loop) (prompt-for-input input-prompt) ((lambda (input) ((lambda (output) (announce-output output-prompt) (user-print output)) (eval input the-global-environment))) (read input-port)) (driver-loop)) (define (prompt-for-input string) (display string output-port)) (define (announce-output string) (display string output-port)) (define (user-print object) (if (compound-procedure? object) (begin (display (quote |#<compound-procedure\x20;|) output-port) (write (procedure-parameters object) output-port) (write (quote >) output-port)) (write object output-port)) (newline output-port)) (driver-loop)))
+(lambda () (define (eval exp env) ((analyze exp) env)) (define (analyze exp) (if (eof-object? exp) (exit) (if (self-evaluating? exp) (analyze-self-evaluating exp) (if (variable? exp) (analyze-variable exp) (if (quoted? exp) (analyze-quoted exp) (if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp)))))))))))) (define (analyze-self-evaluating exp) (lambda (env) exp)) (define (analyze-variable exp) (lambda (env) (lookup-variable-value exp env))) (define (analyze-quoted exp) ((lambda (qval) (lambda (env) qval)) (text-of-quotation exp))) (define (analyze-lambda exp) ((lambda (vars bproc) (lambda (env) (make-procedure vars bproc env))) (lambda-parameters exp) (analyze-sequence (lambda-body exp)))) (define (analyze-definition exp) ((lambda (var vproc) (lambda (env) (define-variable! var (vproc env) env))) (definition-variable exp) (analyze (definition-value exp)))) (define (analyze-assignment exp) ((lambda (var vproc) (lambda (env) (set-variable-value! var (vproc env) env))) (assignment-variable exp) (analyze (assignment-value exp)))) (define (analyze-if exp) ((lambda (pproc cproc aproc) (lambda (env) (if (pproc env) (cproc env) (aproc env)))) (analyze (if-predicate exp)) (analyze (if-consequent exp)) (analyze (if-alternative exp)))) (define (map proc list) (if (null? list) (quote ()) (cons (proc (car list)) (map proc (cdr list))))) (define (analyze-sequence exps) (define (sequentially proc1 proc2) (lambda (env) (proc1 env) (proc2 env))) (define (loop first-proc rest-procs) (if (null? rest-procs) first-proc (loop (sequentially first-proc (car rest-procs)) (cdr rest-procs)))) ((lambda (procs) (if (null? procs) (error "empty sequence -- analyze")) (loop (car procs) (cdr procs))) (map analyze exps))) (define (analyze-application exp) ((lambda (pproc aprocs) (lambda (env) (execute-application (pproc env) (map (lambda (aproc) (aproc env)) aprocs)))) (analyze (operator exp)) (map analyze (operands exp)))) (define (execute-application proc args) (if (primitive-procedure? proc) (c-apply (primitive-implementation proc) args) (if (compound-procedure? proc) ((procedure-body proc) (extend-environment (procedure-parameters proc) args (procedure-environment proc))) (error "unknown procedure type -- execute-application" proc)))) (define (self-evaluating? exp) (or (boolean? exp) (number? exp) (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ()))))) (define (variable? exp) (symbol? exp)) (define (quoted? exp) (tagged-list? exp (quote quote))) (define (text-of-quotation exp) (car (cdr exp))) (define (tagged-list? exp tag) (if (pair? exp) (eq? (car exp) tag) #false)) (define (lambda? exp) (tagged-list? exp (quote lambda))) (define (lambda-parameters exp) (car (cdr exp))) (define (lambda-body exp) (cdr (cdr exp))) (define (make-lambda parameters body) (cons (quote lambda) (cons parameters body))) (define (if? exp) (tagged-list? exp (quote if))) (define (if-predicate exp) (car (cdr exp))) (define (if-consequent exp) (car (cdr (cdr exp)))) (define (if-alternative exp) (if (not (null? (cdr (cdr (cdr exp))))) (car (cdr (cdr (cdr exp)))))) (define (begin? exp) (tagged-list? exp (quote begin))) (define (begin-actions exp) (cdr exp)) (define (application? exp) (pair? exp)) (define (operator exp) (car exp)) (define (operands exp) (cdr exp)) (define (definition? exp) (tagged-list? exp (quote define))) (define (definition-variable exp) (if (symbol? (car (cdr exp))) (car (cdr exp)) (car (car (cdr exp))))) (define (definition-value exp) (if (symbol? (car (cdr exp))) (car (cdr (cdr exp))) (make-lambda (cdr (car (cdr exp))) (cdr (cdr exp))))) (define (assignment? exp) (tagged-list? exp (quote set!))) (define (assignment-variable exp) (car (cdr exp))) (define (assignment-value exp) (car (cdr (cdr exp)))) (define (first-frame env) (car env)) (define the-empty-environment (quote ())) (define (make-frame variables values) (cons variables values)) (define (frame-variables frame) (car frame)) (define (frame-values frame) (cdr frame)) (define (add-binding-to-frame! var val frame) (set-car! frame (cons var (car frame))) (set-cdr! frame (cons val (cdr frame)))) (define (define-variable! var val env) ((lambda (frame) (define (scan vars vals) (if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (scan (frame-variables frame) (frame-values frame))) (first-frame env))) (define (set-variable-value! var val env) (define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "(set!) unbound variable --" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))) (env-loop env)) (define (make-procedure parameters body env) (list (quote procedure) parameters body env)) (define (compound-procedure? p) (tagged-list? p (quote procedure))) (define (procedure-parameters p) (car (cdr p))) (define (procedure-body p) (car (cdr (cdr p)))) (define (procedure-environment p) (car (cdr (cdr (cdr p))))) (define (enclosing-environment env) (cdr env)) (define (extend-environment vars vals base-env) (define (iter vars-0 vals-0 vars-1 vals-1) (if (symbol? vars-0) (cons (make-frame (cons vars-0 vars-1) (cons vals-0 vals-1)) base-env) (if (null? vars-0) (if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals)) (if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1)))))) (iter vars vals (quote ()) (quote ()))) (define (lookup-variable-value var env) (define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "unbound variable" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))) (env-loop env)) (define (primitive-procedure? proc) (tagged-list? proc (quote primitive))) (define (primitive-implementation proc) (car (cdr proc))) (define primitive-procedures (list (list (quote car) car) (list (quote cdr) cdr) (list (quote cons) cons))) (define (primitive-procedure-names) (map car primitive-procedures)) (define (primitive-procedure-objects) (map (lambda (proc) (list (quote primitive) (car (cdr proc)))) primitive-procedures)) (define (setup-environment) ((lambda (initial-env) (define-variable! (quote quote) quote initial-env) (define-variable! (quote lambda) lambda initial-env) (define-variable! (quote define) define initial-env) (define-variable! (quote set!) set! initial-env) (define-variable! (quote if) if initial-env) (define-variable! (quote begin) begin initial-env) initial-env) (extend-environment (primitive-procedure-names) (primitive-procedure-objects) the-empty-environment))) (define the-global-environment (setup-environment)) (define input-prompt "> ") (define output-prompt "=> ") (define input-port (current-input-port)) (define output-port (current-output-port)) (define (driver-loop) (prompt-for-input input-prompt) ((lambda (input) ((lambda (output) (announce-output output-prompt) (user-print output)) (eval input the-global-environment))) (read input-port)) (driver-loop)) (define (prompt-for-input string) (display string output-port)) (define (announce-output string) (display string output-port)) (define (user-print object) (if (compound-procedure? object) (begin (display (quote |#<compound-procedure\x20;|) output-port) (write (procedure-parameters object) output-port) (write (quote >) output-port)) (write object output-port)) (newline output-port)) (driver-loop))
+(driver-loop)
+driver-loop
+(define (user-print object) (if (compound-procedure? object) (begin (display (quote |#<compound-procedure\x20;|) output-port) (write (procedure-parameters object) output-port) (write (quote >) output-port)) (write object output-port)) (newline output-port))
+(lambda (object) (if (compound-procedure? object) (begin (display (quote |#<compound-procedure\x20;|) output-port) (write (procedure-parameters object) output-port) (write (quote >) output-port)) (write object output-port)) (newline output-port))
+(newline output-port)
+output-port
+newline
+(if (compound-procedure? object) (begin (display (quote |#<compound-procedure\x20;|) output-port) (write (procedure-parameters object) output-port) (write (quote >) output-port)) (write object output-port))
+(write object output-port)
+output-port
+object
+write
+(begin (display (quote |#<compound-procedure\x20;|) output-port) (write (procedure-parameters object) output-port) (write (quote >) output-port))
+(write (quote >) output-port)
+output-port
+(quote >)
+write
+(write (procedure-parameters object) output-port)
+output-port
+(procedure-parameters object)
+object
+procedure-parameters
+write
+(display (quote |#<compound-procedure\x20;|) output-port)
+output-port
+(quote |#<compound-procedure\x20;|)
+display
+(compound-procedure? object)
+object
+compound-procedure?
+(define (announce-output string) (display string output-port))
+(lambda (string) (display string output-port))
+(display string output-port)
+output-port
+string
+display
+(define (prompt-for-input string) (display string output-port))
+(lambda (string) (display string output-port))
+(display string output-port)
+output-port
+string
+display
+(define (driver-loop) (prompt-for-input input-prompt) ((lambda (input) ((lambda (output) (announce-output output-prompt) (user-print output)) (eval input the-global-environment))) (read input-port)) (driver-loop))
+(lambda () (prompt-for-input input-prompt) ((lambda (input) ((lambda (output) (announce-output output-prompt) (user-print output)) (eval input the-global-environment))) (read input-port)) (driver-loop))
+(driver-loop)
+driver-loop
+((lambda (input) ((lambda (output) (announce-output output-prompt) (user-print output)) (eval input the-global-environment))) (read input-port))
+(read input-port)
+input-port
+read
+(lambda (input) ((lambda (output) (announce-output output-prompt) (user-print output)) (eval input the-global-environment)))
+((lambda (output) (announce-output output-prompt) (user-print output)) (eval input the-global-environment))
+(eval input the-global-environment)
+the-global-environment
+input
+eval
+(lambda (output) (announce-output output-prompt) (user-print output))
+(user-print output)
+output
+user-print
+(announce-output output-prompt)
+output-prompt
+announce-output
+(prompt-for-input input-prompt)
+input-prompt
+prompt-for-input
+(define output-port (current-output-port))
+(current-output-port)
+current-output-port
+(define input-port (current-input-port))
+(current-input-port)
+current-input-port
+(define output-prompt "=> ")
+=> 
+(define input-prompt "> ")
+> 
+(define the-global-environment (setup-environment))
+(setup-environment)
+setup-environment
+(define (setup-environment) ((lambda (initial-env) (define-variable! (quote quote) quote initial-env) (define-variable! (quote lambda) lambda initial-env) (define-variable! (quote define) define initial-env) (define-variable! (quote set!) set! initial-env) (define-variable! (quote if) if initial-env) (define-variable! (quote begin) begin initial-env) initial-env) (extend-environment (primitive-procedure-names) (primitive-procedure-objects) the-empty-environment)))
+(lambda () ((lambda (initial-env) (define-variable! (quote quote) quote initial-env) (define-variable! (quote lambda) lambda initial-env) (define-variable! (quote define) define initial-env) (define-variable! (quote set!) set! initial-env) (define-variable! (quote if) if initial-env) (define-variable! (quote begin) begin initial-env) initial-env) (extend-environment (primitive-procedure-names) (primitive-procedure-objects) the-empty-environment)))
+((lambda (initial-env) (define-variable! (quote quote) quote initial-env) (define-variable! (quote lambda) lambda initial-env) (define-variable! (quote define) define initial-env) (define-variable! (quote set!) set! initial-env) (define-variable! (quote if) if initial-env) (define-variable! (quote begin) begin initial-env) initial-env) (extend-environment (primitive-procedure-names) (primitive-procedure-objects) the-empty-environment))
+(extend-environment (primitive-procedure-names) (primitive-procedure-objects) the-empty-environment)
+the-empty-environment
+(primitive-procedure-objects)
+primitive-procedure-objects
+(primitive-procedure-names)
+primitive-procedure-names
+extend-environment
+(lambda (initial-env) (define-variable! (quote quote) quote initial-env) (define-variable! (quote lambda) lambda initial-env) (define-variable! (quote define) define initial-env) (define-variable! (quote set!) set! initial-env) (define-variable! (quote if) if initial-env) (define-variable! (quote begin) begin initial-env) initial-env)
+initial-env
+(define-variable! (quote begin) begin initial-env)
+initial-env
+begin
+(quote begin)
+define-variable!
+(define-variable! (quote if) if initial-env)
+initial-env
+if
+(quote if)
+define-variable!
+(define-variable! (quote set!) set! initial-env)
+initial-env
+set!
+(quote set!)
+define-variable!
+(define-variable! (quote define) define initial-env)
+initial-env
+define
+(quote define)
+define-variable!
+(define-variable! (quote lambda) lambda initial-env)
+initial-env
+lambda
+(quote lambda)
+define-variable!
+(define-variable! (quote quote) quote initial-env)
+initial-env
+quote
+(quote quote)
+define-variable!
+(define (primitive-procedure-objects) (map (lambda (proc) (list (quote primitive) (car (cdr proc)))) primitive-procedures))
+(lambda () (map (lambda (proc) (list (quote primitive) (car (cdr proc)))) primitive-procedures))
+(map (lambda (proc) (list (quote primitive) (car (cdr proc)))) primitive-procedures)
+primitive-procedures
+(lambda (proc) (list (quote primitive) (car (cdr proc))))
+(list (quote primitive) (car (cdr proc)))
+(car (cdr proc))
+(cdr proc)
+proc
+cdr
+car
+(quote primitive)
+list
+map
+(define (primitive-procedure-names) (map car primitive-procedures))
+(lambda () (map car primitive-procedures))
+(map car primitive-procedures)
+primitive-procedures
+car
+map
+(define primitive-procedures (list (list (quote car) car) (list (quote cdr) cdr) (list (quote cons) cons)))
+(list (list (quote car) car) (list (quote cdr) cdr) (list (quote cons) cons))
+(list (quote cons) cons)
+cons
+(quote cons)
+list
+(list (quote cdr) cdr)
+cdr
+(quote cdr)
+list
+(list (quote car) car)
+car
+(quote car)
+list
+list
+(define (primitive-implementation proc) (car (cdr proc)))
+(lambda (proc) (car (cdr proc)))
+(car (cdr proc))
+(cdr proc)
+proc
+cdr
+car
+(define (primitive-procedure? proc) (tagged-list? proc (quote primitive)))
+(lambda (proc) (tagged-list? proc (quote primitive)))
+(tagged-list? proc (quote primitive))
+(quote primitive)
+proc
+tagged-list?
+(define (lookup-variable-value var env) (define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "unbound variable" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))) (env-loop env))
+(lambda (var env) (define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "unbound variable" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))) (env-loop env))
+(env-loop env)
+env
+env-loop
+(define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "unbound variable" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env))))
+(lambda (env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "unbound variable" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env))))
+(if (eq? env the-empty-environment) (error "unbound variable" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))
+((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env))
+(first-frame env)
+env
+first-frame
+(lambda (frame) (scan (frame-variables frame) (frame-values frame)))
+(scan (frame-variables frame) (frame-values frame))
+(frame-values frame)
+frame
+frame-values
+(frame-variables frame)
+frame
+frame-variables
+scan
+(error "unbound variable" var)
+var
+unbound variable
+error
+(eq? env the-empty-environment)
+the-empty-environment
+env
+eq?
+(define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals)))))
+(lambda (vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals)))))
+(if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals))))
+(if (eq? var (car vars)) (car vals) (scan (cdr vars) (cdr vals)))
+(scan (cdr vars) (cdr vals))
+(cdr vals)
+vals
+cdr
+(cdr vars)
+vars
+cdr
+scan
+(car vals)
+vals
+car
+(eq? var (car vars))
+(car vars)
+vars
+car
+var
+eq?
+(env-loop (enclosing-environment env))
+(enclosing-environment env)
+env
+enclosing-environment
+env-loop
+(null? vars)
+vars
+null?
+(define (extend-environment vars vals base-env) (define (iter vars-0 vals-0 vars-1 vals-1) (if (symbol? vars-0) (cons (make-frame (cons vars-0 vars-1) (cons vals-0 vals-1)) base-env) (if (null? vars-0) (if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals)) (if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1)))))) (iter vars vals (quote ()) (quote ())))
+(lambda (vars vals base-env) (define (iter vars-0 vals-0 vars-1 vals-1) (if (symbol? vars-0) (cons (make-frame (cons vars-0 vars-1) (cons vals-0 vals-1)) base-env) (if (null? vars-0) (if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals)) (if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1)))))) (iter vars vals (quote ()) (quote ())))
+(iter vars vals (quote ()) (quote ()))
+(quote ())
+(quote ())
+vals
+vars
+iter
+(define (iter vars-0 vals-0 vars-1 vals-1) (if (symbol? vars-0) (cons (make-frame (cons vars-0 vars-1) (cons vals-0 vals-1)) base-env) (if (null? vars-0) (if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals)) (if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1))))))
+(lambda (vars-0 vals-0 vars-1 vals-1) (if (symbol? vars-0) (cons (make-frame (cons vars-0 vars-1) (cons vals-0 vals-1)) base-env) (if (null? vars-0) (if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals)) (if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1))))))
+(if (symbol? vars-0) (cons (make-frame (cons vars-0 vars-1) (cons vals-0 vals-1)) base-env) (if (null? vars-0) (if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals)) (if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1)))))
+(if (null? vars-0) (if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals)) (if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1))))
+(if (null? vals-0) (error "Too few arguments supplied" vars vals) (iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1)))
+(iter (cdr vars-0) (cdr vals-0) (cons (car vars-0) vars-1) (cons (car vals-0) vals-1))
+(cons (car vals-0) vals-1)
+vals-1
+(car vals-0)
+vals-0
+car
+cons
+(cons (car vars-0) vars-1)
+vars-1
+(car vars-0)
+vars-0
+car
+cons
+(cdr vals-0)
+vals-0
+cdr
+(cdr vars-0)
+vars-0
+cdr
+iter
+(error "Too few arguments supplied" vars vals)
+vals
+vars
+Too few arguments supplied
+error
+(null? vals-0)
+vals-0
+null?
+(if (null? vals-0) (cons (make-frame vars-1 vals-1) base-env) (error "Too many arguments supplied" vars vals))
+(error "Too many arguments supplied" vars vals)
+vals
+vars
+Too many arguments supplied
+error
+(cons (make-frame vars-1 vals-1) base-env)
+base-env
+(make-frame vars-1 vals-1)
+vals-1
+vars-1
+make-frame
+cons
+(null? vals-0)
+vals-0
+null?
+(null? vars-0)
+vars-0
+null?
+(cons (make-frame (cons vars-0 vars-1) (cons vals-0 vals-1)) base-env)
+base-env
+(make-frame (cons vars-0 vars-1) (cons vals-0 vals-1))
+(cons vals-0 vals-1)
+vals-1
+vals-0
+cons
+(cons vars-0 vars-1)
+vars-1
+vars-0
+cons
+make-frame
+cons
+(symbol? vars-0)
+vars-0
+symbol?
+(define (enclosing-environment env) (cdr env))
+(lambda (env) (cdr env))
+(cdr env)
+env
+cdr
+(define (procedure-environment p) (car (cdr (cdr (cdr p)))))
+(lambda (p) (car (cdr (cdr (cdr p)))))
+(car (cdr (cdr (cdr p))))
+(cdr (cdr (cdr p)))
+(cdr (cdr p))
+(cdr p)
+p
+cdr
+cdr
+cdr
+car
+(define (procedure-body p) (car (cdr (cdr p))))
+(lambda (p) (car (cdr (cdr p))))
+(car (cdr (cdr p)))
+(cdr (cdr p))
+(cdr p)
+p
+cdr
+cdr
+car
+(define (procedure-parameters p) (car (cdr p)))
+(lambda (p) (car (cdr p)))
+(car (cdr p))
+(cdr p)
+p
+cdr
+car
+(define (compound-procedure? p) (tagged-list? p (quote procedure)))
+(lambda (p) (tagged-list? p (quote procedure)))
+(tagged-list? p (quote procedure))
+(quote procedure)
+p
+tagged-list?
+(define (make-procedure parameters body env) (list (quote procedure) parameters body env))
+(lambda (parameters body env) (list (quote procedure) parameters body env))
+(list (quote procedure) parameters body env)
+env
+body
+parameters
+(quote procedure)
+list
+(define (set-variable-value! var val env) (define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "(set!) unbound variable --" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))) (env-loop env))
+(lambda (var val env) (define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "(set!) unbound variable --" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))) (env-loop env))
+(env-loop env)
+env
+env-loop
+(define (env-loop env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "(set!) unbound variable --" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env))))
+(lambda (env) (define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (if (eq? env the-empty-environment) (error "(set!) unbound variable --" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env))))
+(if (eq? env the-empty-environment) (error "(set!) unbound variable --" var) ((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))
+((lambda (frame) (scan (frame-variables frame) (frame-values frame))) (first-frame env))
+(first-frame env)
+env
+first-frame
+(lambda (frame) (scan (frame-variables frame) (frame-values frame)))
+(scan (frame-variables frame) (frame-values frame))
+(frame-values frame)
+frame
+frame-values
+(frame-variables frame)
+frame
+frame-variables
+scan
+(error "(set!) unbound variable --" var)
+var
+(set!) unbound variable --
+error
+(eq? env the-empty-environment)
+the-empty-environment
+env
+eq?
+(define (scan vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals)))))
+(lambda (vars vals) (if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals)))))
+(if (null? vars) (env-loop (enclosing-environment env)) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))
+(if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals)))
+(scan (cdr vars) (cdr vals))
+(cdr vals)
+vals
+cdr
+(cdr vars)
+vars
+cdr
+scan
+(set-car! vals val)
+val
+vals
+set-car!
+(eq? var (car vars))
+(car vars)
+vars
+car
+var
+eq?
+(env-loop (enclosing-environment env))
+(enclosing-environment env)
+env
+enclosing-environment
+env-loop
+(null? vars)
+vars
+null?
+(define (define-variable! var val env) ((lambda (frame) (define (scan vars vals) (if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))
+(lambda (var val env) ((lambda (frame) (define (scan vars vals) (if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (scan (frame-variables frame) (frame-values frame))) (first-frame env)))
+((lambda (frame) (define (scan vars vals) (if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (scan (frame-variables frame) (frame-values frame))) (first-frame env))
+(first-frame env)
+env
+first-frame
+(lambda (frame) (define (scan vars vals) (if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))) (scan (frame-variables frame) (frame-values frame)))
+(scan (frame-variables frame) (frame-values frame))
+(frame-values frame)
+frame
+frame-values
+(frame-variables frame)
+frame
+frame-variables
+scan
+(define (scan vars vals) (if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals)))))
+(lambda (vars vals) (if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals)))))
+(if (null? vars) (add-binding-to-frame! var val frame) (if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals))))
+(if (eq? var (car vars)) (set-car! vals val) (scan (cdr vars) (cdr vals)))
+(scan (cdr vars) (cdr vals))
+(cdr vals)
+vals
+cdr
+(cdr vars)
+vars
+cdr
+scan
+(set-car! vals val)
+val
+vals
+set-car!
+(eq? var (car vars))
+(car vars)
+vars
+car
+var
+eq?
+(add-binding-to-frame! var val frame)
+frame
+val
+var
+add-binding-to-frame!
+(null? vars)
+vars
+null?
+(define (add-binding-to-frame! var val frame) (set-car! frame (cons var (car frame))) (set-cdr! frame (cons val (cdr frame))))
+(lambda (var val frame) (set-car! frame (cons var (car frame))) (set-cdr! frame (cons val (cdr frame))))
+(set-cdr! frame (cons val (cdr frame)))
+(cons val (cdr frame))
+(cdr frame)
+frame
+cdr
+val
+cons
+frame
+set-cdr!
+(set-car! frame (cons var (car frame)))
+(cons var (car frame))
+(car frame)
+frame
+car
+var
+cons
+frame
+set-car!
+(define (frame-values frame) (cdr frame))
+(lambda (frame) (cdr frame))
+(cdr frame)
+frame
+cdr
+(define (frame-variables frame) (car frame))
+(lambda (frame) (car frame))
+(car frame)
+frame
+car
+(define (make-frame variables values) (cons variables values))
+(lambda (variables values) (cons variables values))
+(cons variables values)
+values
+variables
+cons
+(define the-empty-environment (quote ()))
+(quote ())
+(define (first-frame env) (car env))
+(lambda (env) (car env))
+(car env)
+env
+car
+(define (assignment-value exp) (car (cdr (cdr exp))))
+(lambda (exp) (car (cdr (cdr exp))))
+(car (cdr (cdr exp)))
+(cdr (cdr exp))
+(cdr exp)
+exp
+cdr
+cdr
+car
+(define (assignment-variable exp) (car (cdr exp)))
+(lambda (exp) (car (cdr exp)))
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+(define (assignment? exp) (tagged-list? exp (quote set!)))
+(lambda (exp) (tagged-list? exp (quote set!)))
+(tagged-list? exp (quote set!))
+(quote set!)
+exp
+tagged-list?
+(define (definition-value exp) (if (symbol? (car (cdr exp))) (car (cdr (cdr exp))) (make-lambda (cdr (car (cdr exp))) (cdr (cdr exp)))))
+(lambda (exp) (if (symbol? (car (cdr exp))) (car (cdr (cdr exp))) (make-lambda (cdr (car (cdr exp))) (cdr (cdr exp)))))
+(if (symbol? (car (cdr exp))) (car (cdr (cdr exp))) (make-lambda (cdr (car (cdr exp))) (cdr (cdr exp))))
+(make-lambda (cdr (car (cdr exp))) (cdr (cdr exp)))
+(cdr (cdr exp))
+(cdr exp)
+exp
+cdr
+cdr
+(cdr (car (cdr exp)))
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+cdr
+make-lambda
+(car (cdr (cdr exp)))
+(cdr (cdr exp))
+(cdr exp)
+exp
+cdr
+cdr
+car
+(symbol? (car (cdr exp)))
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+symbol?
+(define (definition-variable exp) (if (symbol? (car (cdr exp))) (car (cdr exp)) (car (car (cdr exp)))))
+(lambda (exp) (if (symbol? (car (cdr exp))) (car (cdr exp)) (car (car (cdr exp)))))
+(if (symbol? (car (cdr exp))) (car (cdr exp)) (car (car (cdr exp))))
+(car (car (cdr exp)))
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+car
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+(symbol? (car (cdr exp)))
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+symbol?
+(define (definition? exp) (tagged-list? exp (quote define)))
+(lambda (exp) (tagged-list? exp (quote define)))
+(tagged-list? exp (quote define))
+(quote define)
+exp
+tagged-list?
+(define (operands exp) (cdr exp))
+(lambda (exp) (cdr exp))
+(cdr exp)
+exp
+cdr
+(define (operator exp) (car exp))
+(lambda (exp) (car exp))
+(car exp)
+exp
+car
+(define (application? exp) (pair? exp))
+(lambda (exp) (pair? exp))
+(pair? exp)
+exp
+pair?
+(define (begin-actions exp) (cdr exp))
+(lambda (exp) (cdr exp))
+(cdr exp)
+exp
+cdr
+(define (begin? exp) (tagged-list? exp (quote begin)))
+(lambda (exp) (tagged-list? exp (quote begin)))
+(tagged-list? exp (quote begin))
+(quote begin)
+exp
+tagged-list?
+(define (if-alternative exp) (if (not (null? (cdr (cdr (cdr exp))))) (car (cdr (cdr (cdr exp))))))
+(lambda (exp) (if (not (null? (cdr (cdr (cdr exp))))) (car (cdr (cdr (cdr exp))))))
+(if (not (null? (cdr (cdr (cdr exp))))) (car (cdr (cdr (cdr exp)))))
+#<undefined>
+(car (cdr (cdr (cdr exp))))
+(cdr (cdr (cdr exp)))
+(cdr (cdr exp))
+(cdr exp)
+exp
+cdr
+cdr
+cdr
+car
+(not (null? (cdr (cdr (cdr exp)))))
+(null? (cdr (cdr (cdr exp))))
+(cdr (cdr (cdr exp)))
+(cdr (cdr exp))
+(cdr exp)
+exp
+cdr
+cdr
+cdr
+null?
+not
+(define (if-consequent exp) (car (cdr (cdr exp))))
+(lambda (exp) (car (cdr (cdr exp))))
+(car (cdr (cdr exp)))
+(cdr (cdr exp))
+(cdr exp)
+exp
+cdr
+cdr
+car
+(define (if-predicate exp) (car (cdr exp)))
+(lambda (exp) (car (cdr exp)))
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+(define (if? exp) (tagged-list? exp (quote if)))
+(lambda (exp) (tagged-list? exp (quote if)))
+(tagged-list? exp (quote if))
+(quote if)
+exp
+tagged-list?
+(define (make-lambda parameters body) (cons (quote lambda) (cons parameters body)))
+(lambda (parameters body) (cons (quote lambda) (cons parameters body)))
+(cons (quote lambda) (cons parameters body))
+(cons parameters body)
+body
+parameters
+cons
+(quote lambda)
+cons
+(define (lambda-body exp) (cdr (cdr exp)))
+(lambda (exp) (cdr (cdr exp)))
+(cdr (cdr exp))
+(cdr exp)
+exp
+cdr
+cdr
+(define (lambda-parameters exp) (car (cdr exp)))
+(lambda (exp) (car (cdr exp)))
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+(define (lambda? exp) (tagged-list? exp (quote lambda)))
+(lambda (exp) (tagged-list? exp (quote lambda)))
+(tagged-list? exp (quote lambda))
+(quote lambda)
+exp
+tagged-list?
+(define (tagged-list? exp tag) (if (pair? exp) (eq? (car exp) tag) #false))
+(lambda (exp tag) (if (pair? exp) (eq? (car exp) tag) #false))
+(if (pair? exp) (eq? (car exp) tag) #false)
+#false
+(eq? (car exp) tag)
+tag
+(car exp)
+exp
+car
+eq?
+(pair? exp)
+exp
+pair?
+(define (text-of-quotation exp) (car (cdr exp)))
+(lambda (exp) (car (cdr exp)))
+(car (cdr exp))
+(cdr exp)
+exp
+cdr
+car
+(define (quoted? exp) (tagged-list? exp (quote quote)))
+(lambda (exp) (tagged-list? exp (quote quote)))
+(tagged-list? exp (quote quote))
+(quote quote)
+exp
+tagged-list?
+(define (variable? exp) (symbol? exp))
+(lambda (exp) (symbol? exp))
+(symbol? exp)
+exp
+symbol?
+(define (self-evaluating? exp) (or (boolean? exp) (number? exp) (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ())))))
+(lambda (exp) (or (boolean? exp) (number? exp) (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ())))))
+(or (boolean? exp) (number? exp) (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ()))))
+(if (boolean? exp) (boolean? exp) (or (number? exp) (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ())))))
+(or (number? exp) (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ()))))
+(if (number? exp) (number? exp) (or (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ())))))
+(or (vector? exp) (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ()))))
+(if (vector? exp) (vector? exp) (or (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ())))))
+(or (char? exp) (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ()))))
+(if (char? exp) (char? exp) (or (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ())))))
+(or (string? exp) (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ()))))
+(if (string? exp) (string? exp) (or (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ())))))
+(or (bytevector? exp) (procedure? exp) (eq? exp (if #false (quote ()))))
+(if (bytevector? exp) (bytevector? exp) (or (procedure? exp) (eq? exp (if #false (quote ())))))
+(or (procedure? exp) (eq? exp (if #false (quote ()))))
+(if (procedure? exp) (procedure? exp) (or (eq? exp (if #false (quote ())))))
+(or (eq? exp (if #false (quote ()))))
+(if (eq? exp (if #false (quote ()))) (eq? exp (if #false (quote ()))) (or))
+(or)
+#false
+(eq? exp (if #false (quote ())))
+(if #false (quote ()))
+#<undefined>
+(quote ())
+#false
+exp
+eq?
+(eq? exp (if #false (quote ())))
+(if #false (quote ()))
+#<undefined>
+(quote ())
+#false
+exp
+eq?
+(procedure? exp)
+exp
+procedure?
+(procedure? exp)
+exp
+procedure?
+(bytevector? exp)
+exp
+bytevector?
+(bytevector? exp)
+exp
+bytevector?
+(string? exp)
+exp
+string?
+(string? exp)
+exp
+string?
+(char? exp)
+exp
+char?
+(char? exp)
+exp
+char?
+(vector? exp)
+exp
+vector?
+(vector? exp)
+exp
+vector?
+(number? exp)
+exp
+number?
+(number? exp)
+exp
+number?
+(boolean? exp)
+exp
+boolean?
+(boolean? exp)
+exp
+boolean?
+(define (execute-application proc args) (if (primitive-procedure? proc) (c-apply (primitive-implementation proc) args) (if (compound-procedure? proc) ((procedure-body proc) (extend-environment (procedure-parameters proc) args (procedure-environment proc))) (error "unknown procedure type -- execute-application" proc))))
+(lambda (proc args) (if (primitive-procedure? proc) (c-apply (primitive-implementation proc) args) (if (compound-procedure? proc) ((procedure-body proc) (extend-environment (procedure-parameters proc) args (procedure-environment proc))) (error "unknown procedure type -- execute-application" proc))))
+(if (primitive-procedure? proc) (c-apply (primitive-implementation proc) args) (if (compound-procedure? proc) ((procedure-body proc) (extend-environment (procedure-parameters proc) args (procedure-environment proc))) (error "unknown procedure type -- execute-application" proc)))
+(if (compound-procedure? proc) ((procedure-body proc) (extend-environment (procedure-parameters proc) args (procedure-environment proc))) (error "unknown procedure type -- execute-application" proc))
+(error "unknown procedure type -- execute-application" proc)
+proc
+unknown procedure type -- execute-application
+error
+((procedure-body proc) (extend-environment (procedure-parameters proc) args (procedure-environment proc)))
+(extend-environment (procedure-parameters proc) args (procedure-environment proc))
+(procedure-environment proc)
+proc
+procedure-environment
+args
+(procedure-parameters proc)
+proc
+procedure-parameters
+extend-environment
+(procedure-body proc)
+proc
+procedure-body
+(compound-procedure? proc)
+proc
+compound-procedure?
+(c-apply (primitive-implementation proc) args)
+args
+(primitive-implementation proc)
+proc
+primitive-implementation
+c-apply
+(primitive-procedure? proc)
+proc
+primitive-procedure?
+(define (analyze-application exp) ((lambda (pproc aprocs) (lambda (env) (execute-application (pproc env) (map (lambda (aproc) (aproc env)) aprocs)))) (analyze (operator exp)) (map analyze (operands exp))))
+(lambda (exp) ((lambda (pproc aprocs) (lambda (env) (execute-application (pproc env) (map (lambda (aproc) (aproc env)) aprocs)))) (analyze (operator exp)) (map analyze (operands exp))))
+((lambda (pproc aprocs) (lambda (env) (execute-application (pproc env) (map (lambda (aproc) (aproc env)) aprocs)))) (analyze (operator exp)) (map analyze (operands exp)))
+(map analyze (operands exp))
+(operands exp)
+exp
+operands
+analyze
+map
+(analyze (operator exp))
+(operator exp)
+exp
+operator
+analyze
+(lambda (pproc aprocs) (lambda (env) (execute-application (pproc env) (map (lambda (aproc) (aproc env)) aprocs))))
+(lambda (env) (execute-application (pproc env) (map (lambda (aproc) (aproc env)) aprocs)))
+(execute-application (pproc env) (map (lambda (aproc) (aproc env)) aprocs))
+(map (lambda (aproc) (aproc env)) aprocs)
+aprocs
+(lambda (aproc) (aproc env))
+(aproc env)
+env
+aproc
+map
+(pproc env)
+env
+pproc
+execute-application
+(define (analyze-sequence exps) (define (sequentially proc1 proc2) (lambda (env) (proc1 env) (proc2 env))) (define (loop first-proc rest-procs) (if (null? rest-procs) first-proc (loop (sequentially first-proc (car rest-procs)) (cdr rest-procs)))) ((lambda (procs) (if (null? procs) (error "empty sequence -- analyze")) (loop (car procs) (cdr procs))) (map analyze exps)))
+(lambda (exps) (define (sequentially proc1 proc2) (lambda (env) (proc1 env) (proc2 env))) (define (loop first-proc rest-procs) (if (null? rest-procs) first-proc (loop (sequentially first-proc (car rest-procs)) (cdr rest-procs)))) ((lambda (procs) (if (null? procs) (error "empty sequence -- analyze")) (loop (car procs) (cdr procs))) (map analyze exps)))
+((lambda (procs) (if (null? procs) (error "empty sequence -- analyze")) (loop (car procs) (cdr procs))) (map analyze exps))
+(map analyze exps)
+exps
+analyze
+map
+(lambda (procs) (if (null? procs) (error "empty sequence -- analyze")) (loop (car procs) (cdr procs)))
+(loop (car procs) (cdr procs))
+(cdr procs)
+procs
+cdr
+(car procs)
+procs
+car
+loop
+(if (null? procs) (error "empty sequence -- analyze"))
+#<undefined>
+(error "empty sequence -- analyze")
+empty sequence -- analyze
+error
+(null? procs)
+procs
+null?
+(define (loop first-proc rest-procs) (if (null? rest-procs) first-proc (loop (sequentially first-proc (car rest-procs)) (cdr rest-procs))))
+(lambda (first-proc rest-procs) (if (null? rest-procs) first-proc (loop (sequentially first-proc (car rest-procs)) (cdr rest-procs))))
+(if (null? rest-procs) first-proc (loop (sequentially first-proc (car rest-procs)) (cdr rest-procs)))
+(loop (sequentially first-proc (car rest-procs)) (cdr rest-procs))
+(cdr rest-procs)
+rest-procs
+cdr
+(sequentially first-proc (car rest-procs))
+(car rest-procs)
+rest-procs
+car
+first-proc
+sequentially
+loop
+first-proc
+(null? rest-procs)
+rest-procs
+null?
+(define (sequentially proc1 proc2) (lambda (env) (proc1 env) (proc2 env)))
+(lambda (proc1 proc2) (lambda (env) (proc1 env) (proc2 env)))
+(lambda (env) (proc1 env) (proc2 env))
+(proc2 env)
+env
+proc2
+(proc1 env)
+env
+proc1
+(define (map proc list) (if (null? list) (quote ()) (cons (proc (car list)) (map proc (cdr list)))))
+(lambda (proc list) (if (null? list) (quote ()) (cons (proc (car list)) (map proc (cdr list)))))
+(if (null? list) (quote ()) (cons (proc (car list)) (map proc (cdr list))))
+(cons (proc (car list)) (map proc (cdr list)))
+(map proc (cdr list))
+(cdr list)
+list
+cdr
+proc
+map
+(proc (car list))
+(car list)
+list
+car
+proc
+cons
+(quote ())
+(null? list)
+list
+null?
+(define (analyze-if exp) ((lambda (pproc cproc aproc) (lambda (env) (if (pproc env) (cproc env) (aproc env)))) (analyze (if-predicate exp)) (analyze (if-consequent exp)) (analyze (if-alternative exp))))
+(lambda (exp) ((lambda (pproc cproc aproc) (lambda (env) (if (pproc env) (cproc env) (aproc env)))) (analyze (if-predicate exp)) (analyze (if-consequent exp)) (analyze (if-alternative exp))))
+((lambda (pproc cproc aproc) (lambda (env) (if (pproc env) (cproc env) (aproc env)))) (analyze (if-predicate exp)) (analyze (if-consequent exp)) (analyze (if-alternative exp)))
+(analyze (if-alternative exp))
+(if-alternative exp)
+exp
+if-alternative
+analyze
+(analyze (if-consequent exp))
+(if-consequent exp)
+exp
+if-consequent
+analyze
+(analyze (if-predicate exp))
+(if-predicate exp)
+exp
+if-predicate
+analyze
+(lambda (pproc cproc aproc) (lambda (env) (if (pproc env) (cproc env) (aproc env))))
+(lambda (env) (if (pproc env) (cproc env) (aproc env)))
+(if (pproc env) (cproc env) (aproc env))
+(aproc env)
+env
+aproc
+(cproc env)
+env
+cproc
+(pproc env)
+env
+pproc
+(define (analyze-assignment exp) ((lambda (var vproc) (lambda (env) (set-variable-value! var (vproc env) env))) (assignment-variable exp) (analyze (assignment-value exp))))
+(lambda (exp) ((lambda (var vproc) (lambda (env) (set-variable-value! var (vproc env) env))) (assignment-variable exp) (analyze (assignment-value exp))))
+((lambda (var vproc) (lambda (env) (set-variable-value! var (vproc env) env))) (assignment-variable exp) (analyze (assignment-value exp)))
+(analyze (assignment-value exp))
+(assignment-value exp)
+exp
+assignment-value
+analyze
+(assignment-variable exp)
+exp
+assignment-variable
+(lambda (var vproc) (lambda (env) (set-variable-value! var (vproc env) env)))
+(lambda (env) (set-variable-value! var (vproc env) env))
+(set-variable-value! var (vproc env) env)
+env
+(vproc env)
+env
+vproc
+var
+set-variable-value!
+(define (analyze-definition exp) ((lambda (var vproc) (lambda (env) (define-variable! var (vproc env) env))) (definition-variable exp) (analyze (definition-value exp))))
+(lambda (exp) ((lambda (var vproc) (lambda (env) (define-variable! var (vproc env) env))) (definition-variable exp) (analyze (definition-value exp))))
+((lambda (var vproc) (lambda (env) (define-variable! var (vproc env) env))) (definition-variable exp) (analyze (definition-value exp)))
+(analyze (definition-value exp))
+(definition-value exp)
+exp
+definition-value
+analyze
+(definition-variable exp)
+exp
+definition-variable
+(lambda (var vproc) (lambda (env) (define-variable! var (vproc env) env)))
+(lambda (env) (define-variable! var (vproc env) env))
+(define-variable! var (vproc env) env)
+env
+(vproc env)
+env
+vproc
+var
+define-variable!
+(define (analyze-lambda exp) ((lambda (vars bproc) (lambda (env) (make-procedure vars bproc env))) (lambda-parameters exp) (analyze-sequence (lambda-body exp))))
+(lambda (exp) ((lambda (vars bproc) (lambda (env) (make-procedure vars bproc env))) (lambda-parameters exp) (analyze-sequence (lambda-body exp))))
+((lambda (vars bproc) (lambda (env) (make-procedure vars bproc env))) (lambda-parameters exp) (analyze-sequence (lambda-body exp)))
+(analyze-sequence (lambda-body exp))
+(lambda-body exp)
+exp
+lambda-body
+analyze-sequence
+(lambda-parameters exp)
+exp
+lambda-parameters
+(lambda (vars bproc) (lambda (env) (make-procedure vars bproc env)))
+(lambda (env) (make-procedure vars bproc env))
+(make-procedure vars bproc env)
+env
+bproc
+vars
+make-procedure
+(define (analyze-quoted exp) ((lambda (qval) (lambda (env) qval)) (text-of-quotation exp)))
+(lambda (exp) ((lambda (qval) (lambda (env) qval)) (text-of-quotation exp)))
+((lambda (qval) (lambda (env) qval)) (text-of-quotation exp))
+(text-of-quotation exp)
+exp
+text-of-quotation
+(lambda (qval) (lambda (env) qval))
+(lambda (env) qval)
+qval
+(define (analyze-variable exp) (lambda (env) (lookup-variable-value exp env)))
+(lambda (exp) (lambda (env) (lookup-variable-value exp env)))
+(lambda (env) (lookup-variable-value exp env))
+(lookup-variable-value exp env)
+env
+exp
+lookup-variable-value
+(define (analyze-self-evaluating exp) (lambda (env) exp))
+(lambda (exp) (lambda (env) exp))
+(lambda (env) exp)
+exp
+(define (analyze exp) (if (eof-object? exp) (exit) (if (self-evaluating? exp) (analyze-self-evaluating exp) (if (variable? exp) (analyze-variable exp) (if (quoted? exp) (analyze-quoted exp) (if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp))))))))))))
+(lambda (exp) (if (eof-object? exp) (exit) (if (self-evaluating? exp) (analyze-self-evaluating exp) (if (variable? exp) (analyze-variable exp) (if (quoted? exp) (analyze-quoted exp) (if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp))))))))))))
+(if (eof-object? exp) (exit) (if (self-evaluating? exp) (analyze-self-evaluating exp) (if (variable? exp) (analyze-variable exp) (if (quoted? exp) (analyze-quoted exp) (if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp)))))))))))
+(if (self-evaluating? exp) (analyze-self-evaluating exp) (if (variable? exp) (analyze-variable exp) (if (quoted? exp) (analyze-quoted exp) (if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp))))))))))
+(if (variable? exp) (analyze-variable exp) (if (quoted? exp) (analyze-quoted exp) (if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp)))))))))
+(if (quoted? exp) (analyze-quoted exp) (if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp))))))))
+(if (lambda? exp) (analyze-lambda exp) (if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp)))))))
+(if (definition? exp) (analyze-definition exp) (if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp))))))
+(if (assignment? exp) (analyze-assignment exp) (if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp)))))
+(if (if? exp) (analyze-if exp) (if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp))))
+(if (begin? exp) (analyze-sequence (begin-actions exp)) (if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp)))
+(if (application? exp) (analyze-application exp) (error "unknown expression type -- analyze" exp))
+(error "unknown expression type -- analyze" exp)
+exp
+unknown expression type -- analyze
+error
+(analyze-application exp)
+exp
+analyze-application
+(application? exp)
+exp
+application?
+(analyze-sequence (begin-actions exp))
+(begin-actions exp)
+exp
+begin-actions
+analyze-sequence
+(begin? exp)
+exp
+begin?
+(analyze-if exp)
+exp
+analyze-if
+(if? exp)
+exp
+if?
+(analyze-assignment exp)
+exp
+analyze-assignment
+(assignment? exp)
+exp
+assignment?
+(analyze-definition exp)
+exp
+analyze-definition
+(definition? exp)
+exp
+definition?
+(analyze-lambda exp)
+exp
+analyze-lambda
+(lambda? exp)
+exp
+lambda?
+(analyze-quoted exp)
+exp
+analyze-quoted
+(quoted? exp)
+exp
+quoted?
+(analyze-variable exp)
+exp
+analyze-variable
+(variable? exp)
+exp
+variable?
+(analyze-self-evaluating exp)
+exp
+analyze-self-evaluating
+(self-evaluating? exp)
+exp
+self-evaluating?
+(exit)
+exit
+(eof-object? exp)
+exp
+eof-object?
+(define (eval exp env) ((analyze exp) env))
+(lambda (exp env) ((analyze exp) env))
+((analyze exp) env)
+env
+(analyze exp)
+exp
+analyze
