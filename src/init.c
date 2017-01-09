@@ -33,7 +33,7 @@ static Object c_char_to_c(Object args) {
   if (c == 0x09) {
     return cons(symbol_vertical_new("#\\x5c;\\x5c;tab"), empty);
   }
-  return cons(symbol_vertical_new("#\\x5c;#\\x5c;"), cons(o, empty));
+  return cons(symbol_vertical_new("#\\x5c;\\x5c;"), cons(o, empty));
 }
 static Object c_self_evaluating_p(Object args) {
   Type t = carref(args).type;

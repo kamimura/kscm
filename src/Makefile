@@ -9,7 +9,7 @@ CFLAGS=	-g -Wall -Werror -O3\
 LDLIBS=\
 	`pkg-config --libs glib-2.0`\
 	-L/opt/local/lib -lgmp -lmpfr -lmpc -lfl
-n
+
 
 SRC = .
 OBJS = parse.tab.o lex.yy.o  init.o
@@ -37,13 +37,13 @@ OBJS += scm_complex.o
 OBJS += rational.o
 OBJS += byte.o
 
-sample: sample.scm libkscm
-	cp sample.scm input.scm
-	time ../compiler/ksc
-	$(CC) $(CFLAGS) -I./ $(LDLIBS) -L./ -lkscm output.c -o sample
-	time ./sample
-	$(CC) $(CFLAGS) -I./ $(LDLIBS) -L./ -lkscm output.c -o sample
-	time ./sample
+ksc: sample.scm libkscm
+	./ksc sample
+	./sample sample
+
+ksi: ksi.scm libkscm
+	./ksc ksi
+	./ksi
 
 parse.tab.c parse.tab.h: parse.y scm_string.h bytevector.h
 	$(YACC) parse.y
@@ -98,11 +98,3 @@ scm_complex.o: number.h scm_complex.h scm_complex.c
 rational.o: scm_complex.h rational.h rational.c
 
 byte.o: rational.h byte.h byte.c
-
-gosh: $(OBJS)
-	cp ksc.scm input.scm
-	gosh -r7 < ksc.scm
-	cp compiler.log compiler1.log
-	$(CC) $(CFLAGS) $(LDLIBS) $(OBJS) output.c -o sample
-	cp sample ksc
-

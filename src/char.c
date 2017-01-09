@@ -102,7 +102,12 @@ static Object foldcase(Object args) {
   g_free(s);
   return o;
 }
-
+static Object char_to_integer(Object args) {
+  Object out = {.type=RATIONAL};
+  mpq_init(out.rational);
+  mpq_set_ui(out.rational, carref(argl).ch, 1);
+  return out;
+}
 #include "env.h"
 #include "symbol.h"
 void char_init() {
@@ -122,11 +127,11 @@ void char_init() {
       "char-alphabetic?", "char-numeric?",    "char-whitespace?",
       "char-upper-case?", "char-lower-case?", "digit-value",
       "char->integer",    "integer->char",    "char-upcase",
-      "char-downcase",    "char-foldcase",    NULL};
+      "char-downcase",    "char-foldcase",    "c-char->integer", NULL};
   fn_obj_of_obj procs[] = {alphabetic_p, numeric_p,       whitespace_p,
                            upper_case_p, lower_case_p,    digit_value,
                            to_integer,   integer_to_char, upcase,
-                           downcase,     foldcase,        NULL};
+                           downcase,     foldcase,        char_to_integer, NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

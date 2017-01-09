@@ -198,9 +198,11 @@ Object extend_environment(Object params) {
     exit(1);
   }
   if (list_p(params) && (length(params) != length(argl))) {
-    fprintf(stderr, "make_frame: %lu %lu\n", length(params), length(argl));
-    object_writeln_stdout(params);
-    object_writeln_stdout(argl);
+    fprintf(stderr, "Error: (");
+    object_write_stderr(proc);
+    fprintf(stderr, ") wrong number of arguments -- ");
+    object_write_stderr(argl);
+    fprintf(stderr, "\n");
     exit(1);
   }
   if (params.type == PAIR && symbol_all_p(params)) {

@@ -19,6 +19,9 @@ static bool eqv_p(Object o1, Object o2) {
   return mpq_equal(o1.rational, o2.rational);
 }
 static bool exact_p(Object o) { return true; }
+static bool integer_p(Object o) {
+  return mpz_cmp_ui(mpq_denref(o.rational), 1) == 0;
+}
 static bool finite_p(Object o) { return true; }
 static bool infinite_p(Object o) { return false; }
 static bool nan_p(Object o) { return false; }
@@ -113,6 +116,9 @@ static Object rational_round(Object o) {
 static Object to_complex(Object o) {
   return (Object){.type = COMPLEX, .z = mpq_get_d(o.rational)};
 }
+static Object inexact(Object o) {
+  return (Object){.type = COMPLEX, .z = mpq_get_d(o.rational)};
+}
 static Object rational_sqrt(Object o) {
   if (mpz_perfect_square_p(mpq_numref(o.rational)) &&
       mpz_perfect_square_p(mpq_denref(o.rational))) {
@@ -136,12 +142,16 @@ void rational_init() {
     put_bool_of_obj_obj(ks1[i], RATIONAL, RATIONAL, vs1[i]);
   }
 
-  fn_obj_of_obj bool_of_obj_ks[] = {number_exact_p,    number_finite_p,
-                                    number_infinite_p, number_nan_p,
-                                    number_negative_p, NULL};
+  fn_obj_of_obj bool_of_obj_ks[] = {object_integer_p,
+                                    number_exact_p,
+                                    number_finite_p,
+                                    number_infinite_p,
+                                    number_nan_p,
+                                    number_negative_p,
+                                    NULL};
 
-  fn_bool_of_obj bool_of_obj_vs[] = {exact_p, finite_p,   infinite_p,
-                                     nan_p,   negative_p, NULL};
+  fn_bool_of_obj bool_of_obj_vs[] = {
+      integer_p, exact_p, finite_p, infinite_p, nan_p, negative_p, NULL};
   for (size_t i = 0; bool_of_obj_ks[i] != NULL; i++) {
     put_bool_of_obj(bool_of_obj_ks[i], RATIONAL, bool_of_obj_vs[i]);
   }
@@ -159,13 +169,14 @@ void rational_init() {
   for (size_t i = 0; of_obj_file_ks[i] != NULL; i++) {
     put_of_obj_file(of_obj_file_ks[i], RATIONAL, of_obj_file_vs[i]);
   }
-  fn_obj_of_obj obj_of_obj_ks[] = {
-      object_copy,  number_numerator, number_denominator,
-      number_floor, number_ceiling,   number_truncate,
-      number_round, number_sqrt,      NULL};
-  fn_obj_of_obj obj_of_obj_vs[] = {rational_copy,  numerator,     denominator,
-                                   rational_floor, ceiling,       truncate,
-                                   rational_round, rational_sqrt, NULL};
+  fn_obj_of_obj obj_of_obj_ks[] = {object_copy,        number_numerator,
+                                   number_denominator, number_floor,
+                                   number_ceiling,     number_truncate,
+                                   number_round,       number_sqrt,
+                                   number_inexact,     NULL};
+  fn_obj_of_obj obj_of_obj_vs[] = {
+      rational_copy, numerator,      denominator,   rational_floor, ceiling,
+      truncate,      rational_round, rational_sqrt, inexact,        NULL};
   for (size_t i = 0; obj_of_obj_ks[i] != NULL; i++) {
     put_obj_of_obj(obj_of_obj_ks[i], RATIONAL, obj_of_obj_vs[i]);
   }

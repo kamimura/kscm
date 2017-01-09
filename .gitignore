@@ -27,6 +27,9 @@
 *.i*86
 *.x86_64
 *.hex
+src/sample
+src/ksc
+src/ksi
 
 # Debug files
 *.dSYM/
@@ -34,3 +37,5 @@
 
 *~
 *.bak
+.DS_Store
+doc

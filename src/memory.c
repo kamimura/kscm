@@ -1,6 +1,6 @@
 #include "memory.h"
 
-static const size_t MEMORY_SIZE = 100000;
+static const size_t MEMORY_SIZE = 1000000;
 static Object *cars = NULL;
 static Object *cdrs = NULL;
 static bool *marks = NULL;
@@ -64,7 +64,7 @@ void memory_init() {
 
 static bool tree_p(Object o) {
   Type t = o.type;
-  return t == PAIR || t == STRING || t == PROC_COMPILED;
+  return t == PAIR || t == STRING || t == PROC_COMPILED || t == BYTEVECTOR;
 }
 Object env = {.type = UNDEF};
 Object val = {.type = UNDEF};

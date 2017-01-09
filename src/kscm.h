@@ -41,6 +41,8 @@ enum Type {
   VECTOR,
   BYTE, /* 20 */
   BYTEVECTOR,
+  BYTEVECTOR_LENGTH,
+  BYTES,
   EOF_OBJ,
   QUOTE,
   LAMBDA,
@@ -50,6 +52,7 @@ enum Type {
   BEGIN_OBJ,
   AND_OBJ,
   OR_OBJ,
+  LOAD,
   LABEL,
 };
 struct Object {
@@ -62,7 +65,8 @@ struct Object {
     char *symbol;
     /* char *symbol_vertical; */
     uint8_t byte;
-    uint8_t *bytevector;
+    size_t len;
+    uint8_t *bytes;
     gunichar ch;
     fn_obj_of_obj proc;
     FILE *port;

@@ -9,9 +9,10 @@
   (define (print-code code port)
     (display '|/** \x5c;file */| port)    
     (newline port)
-    (display '|#include "kscm.h"| port)
+    (display '|#include <kscm.h>| port)
     (newline port)
-    (display '|int main (int argc,char *argv[]){init();get_command_line(argc, argv);| port)
+    (display
+     '|int main (int argc,char *argv[]){init();get_command_line(argc, argv);| port)
     (print-elements (c-caddr code) port)
     (display '|printf("=> ");object_write_stdout(val);puts("");}| port))
   (define undef (if #f 0))
@@ -65,10 +66,7 @@
     (if (null? exp)
         '#f
         (list 'if (car exp) (car exp) (cons 'or (cdr exp)))))
-  (define log-port (open-output-file "compiler.log"))
   (define (compile exp target linkage)
-    (display exp log-port)
-    (newline log-port)
     (if (c-self-evaluating? exp)
         (compile-self-evaluating exp target linkage)
         (if (symbol? exp)
@@ -104,9 +102,16 @@
                                                         (or->if (cdr exp))
                                                         target
                                                         linkage)
-                                                       (compile-application
-                                                        exp target linkage
-                                                        )))))))))
+                                                       (if (eq? o 'load)
+                                                           (compile
+                                                            (read
+                                                             (open-input-file
+                                                              (c-cadr exp)))
+                                                            target
+                                                            linkage)
+                                                           (compile-application
+                                                            exp target linkage
+                                                            ))))))))))
                        (compile-application exp target linkage)))
                  (car exp))
                 (error '|unknown expression type -- compile| exp)))))
@@ -164,7 +169,7 @@
                                    object_free(&| target '|);|
                                    target '| = t;}|))))))
      (c-cadr exp)
-     (compile (c-caddrexp) 'val 'next)))
+     (compile (c-caddr exp) 'val 'next)))
   (define (compile-definition exp target linkage)
     ((lambda (var get-value-code)
        (end-with-linkage
@@ -304,7 +309,11 @@
           (append-instruction-sequences
            (c-make-instruction-sequence
             '(proc) '()
-            (list '|if (proc.type == PROC) { goto |
+            (list '|if (proc.type == PROC_APPLY) {
+                     proc = apply_proc();
+                     argl = apply_argl();
+                   }
+                   if (proc.type == PROC) { goto |
                   primitive-branch '|;}|))
            (parallel-instruction-sequences
             (compile-proc-appl target compiled-linkage)
@@ -412,10 +421,39 @@
                    (c-registers-modified seq2))
      (c-append (c-statements seq1) (c-statements seq2))))
 
-  (define input-file (open-input-file "input.scm"))
-  (define output-file (open-output-file "output.c"))
-  (define data (read input-file))
-  (define code (compile data 'val 'next))
-  (print-code code output-file)
-  'compiled
+  (define argv (command-line))
+  (if (c-= (length argv) 2)
+      (begin
+        (define target (c-cadr argv))
+        (define input-filename
+          (c-list->string
+           (c-append (c-string->list target)
+                     (c-string->list ".scm"))))
+        (define output-filename
+          (c-list->string
+           (c-append (c-string->list target)
+                     (c-string->list ".c"))))        
+        
+        (define input-file (open-input-file input-filename))
+        (define output-file (open-output-file output-filename))
+        (define data (read input-file))
+        (define code (compile data 'val 'next))
+        (print-code code output-file)
+        (define cc "cc ")
+        (define cflags "-g -Wall -Werror -O3 `pkg-config --cflags glib-2.0` -I./ ")
+        (define ldlibs "`pkg-config --libs glib-2.0` -L/opt/local/lib -lgmp -lmpfr -lmpc -lfl -L./ -lkscm ")
+        (define command
+          (c-list->string
+           (c-append
+            (c-string->list cc)
+            (c-string->list cflags)
+            (c-string->list ldlibs)
+            (c-string->list output-filename)
+            (c-string->list " -o ")
+            (c-string->list target))))
+        (flush-output-port output-file)
+        (if (c-= (run-shell-command command) 0)
+            'compiled
+            'failed))
+      (error "usage: ksc <output>"))
   )

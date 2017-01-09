@@ -36,7 +36,10 @@ static Object c_delete_file(Object args) {
   return undef;
 }
 
-static Object c_command_line(Object args) { return cmd_line_list; }
+static Object c_command_line(Object args) {
+  check_argl_length("command-line", 0);
+  return cmd_line_list;
+}
 static Object c_run_shell_command(Object args) {
   Object o = carref(argl);
   glong len = 0;
@@ -68,7 +71,7 @@ static Object c_exit(Object args) {
     exit(0);
   }
   check_argl_length("exit", 1);
-  printf("exit:");
+  printf("exit: ");
   Object o = carref(argl);
   object_writeln_stdout(o);
   if (o.type == BOOLEAN && o.boolean) {
@@ -77,8 +80,8 @@ static Object c_exit(Object args) {
   exit(1);
 }
 void system_init() {
-  char const *names[] = {"c-delte-file", "c-command-line",
-                         "c-run-shell-command", "exit", NULL};
+  char const *names[] = {"c-delete-file", "command-line", "run-shell-command",
+                         "exit", NULL};
   fn_obj_of_obj procs[] = {c_delete_file, c_command_line, c_run_shell_command,
                            c_exit, NULL};
   for (size_t i = 0; names[i] != NULL; i++) {

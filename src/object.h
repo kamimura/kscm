@@ -42,7 +42,7 @@ Object object_eqv_p(Object args);
 Object object_eq_p(Object args);
 
 /*  Numbers */
-Object object_complex_p(Object args);
+Object object_integer_p(Object args);
 
 Object object_write(Object args);
 extern FILE *yyout;
@@ -50,6 +50,7 @@ Object object_display(Object args);
 Object object_symbol_p(Object args);
 
 void object_writeln_stdout(Object o);
+void object_write_stderr(Object o);
 
 void object_init();
 

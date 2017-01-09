@@ -30,6 +30,7 @@ static void write(Object o, FILE *s) {
 }
 
 /* number.h */
+static bool integer_p(Object o) { return o.z == round(o.z); }
 static bool exact_p(Object o) { return false; }
 static bool finite_p(Object o) {
   return !isinf(creal(o.z)) && !isinf(cimag(o.z)) && !isnan(creal(o.z)) &&
@@ -81,6 +82,8 @@ static Object complex_round(Object o) { return apply_d_of_d(round, o); }
 static Object complex_sqrt(Object o) {
   return (Object){.type = COMPLEX, .z = csqrt(o.z)};
 }
+static Object inexact(Object o) { return o; }
+
 static Object exact(Object o) {
   Object out = {.type = RATIONAL};
   mpq_init(out.rational);
@@ -100,11 +103,15 @@ void complex_init() {
     put_of_obj_file(of_obj_file_ks[i], COMPLEX, of_obj_file_vs[i]);
   }
   /* number.h */
-  fn_obj_of_obj bool_of_obj_ks[] = {number_exact_p,    number_finite_p,
-                                    number_infinite_p, number_nan_p,
-                                    number_negative_p, NULL};
-  fn_bool_of_obj bool_of_obj_vs[] = {exact_p, finite_p,   infinite_p,
-                                     nan_p,   negative_p, NULL};
+  fn_obj_of_obj bool_of_obj_ks[] = {object_integer_p,
+                                    number_exact_p,
+                                    number_finite_p,
+                                    number_infinite_p,
+                                    number_nan_p,
+                                    number_negative_p,
+                                    NULL};
+  fn_bool_of_obj bool_of_obj_vs[] = {
+      integer_p, exact_p, finite_p, infinite_p, nan_p, negative_p, NULL};
   for (size_t i = 0; bool_of_obj_ks[i] != NULL; i++) {
     put_bool_of_obj(bool_of_obj_ks[i], COMPLEX, bool_of_obj_vs[i]);
   }
@@ -117,12 +124,11 @@ void complex_init() {
                        obj_of_obj_obj_vs[i]);
   }
   fn_obj_of_obj obj_of_obj_ks[] = {
-      number_floor, number_ceiling, number_truncate,
-      number_round, number_sqrt,    number_exact,
-      NULL};
+      number_floor, number_ceiling, number_truncate, number_round,
+      number_sqrt,  number_exact,   number_inexact,  NULL};
   fn_obj_of_obj obj_of_obj_vs[] = {complex_floor, ceiling,      truncate,
                                    complex_round, complex_sqrt, exact,
-                                   NULL};
+                                   inexact,       NULL};
   for (size_t i = 0; obj_of_obj_ks[i] != NULL; i++) {
     put_obj_of_obj(obj_of_obj_ks[i], COMPLEX, obj_of_obj_vs[i]);
   }

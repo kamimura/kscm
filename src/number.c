@@ -71,10 +71,14 @@ Object number_lcm(Object args) {
   return apply_obj_of_obj_obj(number_lcm, args);
 }
 static Object apply_obj_of_obj(fn_obj_of_obj fn, Object args) {
-  Object o = carref(args);
+  Object o = carref(argl);
   fn_obj_of_obj fn0 = get_obj_of_obj(fn, o);
   return fn0(o);
 }
+Object number_inexact(Object args) {
+  return apply_obj_of_obj(number_inexact, args);
+}
+
 Object number_numerator(Object args) {
   return apply_obj_of_obj(number_numerator, args);
 }
@@ -104,11 +108,15 @@ Object number_exact(Object args) {
 void number_init() {
   char const *names[] = {"+", "-", "negative?", "<", "number->string",
                          /*  */
-                         "c-=", "c-+", "c-*", "c--", "c-/", NULL};
+                         "=", "c-=", "c-+", "c-*", "c--", "c-<", "c-/",
+                         "c-inexact", "c-exact?", "inexact", "exact?",
+                         "c-ceiling",NULL};
   fn_obj_of_obj procs[] = {
       number_add, number_sub, number_negative_p, number_lt, number_to_string,
       /*  */
-      number_math_equal, number_add, number_mul, number_sub, number_div, NULL};
+      number_math_equal, number_math_equal, number_add, number_mul, number_sub,
+      number_lt, number_div, number_inexact, number_exact_p, number_inexact,
+      number_exact_p, number_ceiling, NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

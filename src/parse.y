@@ -48,7 +48,7 @@ Object input_obj;
                         byte
 %%
 
-ptoragm:        datum
+program:        datum
                 {
                     input_obj = $1;
                     yacc_obj = empty;

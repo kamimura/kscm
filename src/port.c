@@ -97,6 +97,23 @@ static void port_output_binary_write(Object o, FILE *s) {
 static void port_error_write(Object o, FILE *s) {
   fprintf(s, "#<error-port: %p>", o.port);
 }
+static Object flush_output_port(Object args) {
+  size_t len = argl_length();
+  if (len > 1) {
+    argl_length_error("flush-output-port");
+  }
+  if (len == 0) {
+    fflush(cur_output);
+  } else if (len == 1) {
+    Object o = carref(argl);
+    if (o.type == PORT_OUTPUT_TEXT || o.type == PORT_OUTPUT_BIN) {
+      fflush(o.port);
+    } else {
+      argl_type_error("flush-output-port");
+    }
+  }
+  return undef;
+}
 void port_init() {
   Type ts[] = {PORT_INPUT_TEXT, PORT_INPUT_BIN, PORT_OUTPUT_TEXT,
                PORT_OUTPUT_BIN, PORT_ERROR_TEXT};
@@ -127,28 +144,18 @@ void port_init() {
     put_of_obj_file(of_obj_file_ks[i], PORT_OUTPUT_BIN, of_obj_file_vs4[i]);
     put_of_obj_file(of_obj_file_ks[i], PORT_ERROR_TEXT, of_obj_file_vs5[i]);
   }
-  char const *names[] = {"input-port-open?",
-                         "output-port-open?",
-                         "current-input-port",
-                         "current-output-port",
-                         "current-error-port",
-                         "open-input-file",
-                         "open-binary-input-file",
-                         "open-output-file",
-                         "open-binary-output-file",
-                         "close-port",
-                         NULL};
-  fn_obj_of_obj procs[] = {input_port_open_p,
-                           output_port_open_p,
-                           current_input_port,
-                           current_output_port,
-                           current_error_port,
-                           open_input_file,
-                           open_binary_input_file,
-                           open_output_file,
-                           open_binary_output_file,
-                           close_port,
-                           NULL};
+  char const *names[] = {"input-port-open?",        "output-port-open?",
+                         "current-input-port",      "current-output-port",
+                         "current-error-port",      "open-input-file",
+                         "open-binary-input-file",  "open-output-file",
+                         "open-binary-output-file", "close-port",
+                         "flush-output-port",       NULL};
+  fn_obj_of_obj procs[] = {input_port_open_p,       output_port_open_p,
+                           current_input_port,      current_output_port,
+                           current_error_port,      open_input_file,
+                           open_binary_input_file,  open_output_file,
+                           open_binary_output_file, close_port,
+                           flush_output_port,       NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

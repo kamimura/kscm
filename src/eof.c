@@ -15,7 +15,7 @@ void eof_init() {
     put_of_obj_file(of_obj_file_ks[i], EOF_OBJ, of_obj_file_vs[i]);
   }
 
-  char const *names[] = {"eof-object", NULL};
+  char const *names[] = {"c-eof-object", NULL};
   fn_obj_of_obj procs[] = {eof_object, NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
