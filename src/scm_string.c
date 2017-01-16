@@ -17,14 +17,13 @@ Object string_cons(Object o1, Object o2) {
 static bool eqv_p(Object o1, Object o2) { return o1.index == o2.index; }
 
 static Object make_string(Object args) {
-  Object k = carref(args);
-  Object c = carref(cdrref(args));
-  size_t m = mpz_get_ui(mpq_numref(k.rational));
-  Object o = (Object){.type = STRING_EMPTY};
-  for (size_t i = 0; i < m; i++) {
-    o = string_cons(c, o);
+  size_t k = mpz_get_ui(mpq_numref(carref(argl).rational));
+  argl = carref(cdrref(argl));
+  Object out = (Object){.type = STRING_EMPTY};
+  for (size_t i = 0; i < k; i++) {
+    out = string_cons(argl, out);
   }
-  return o;
+  return out;
 }
 static Object length(Object args) {
   Object o = carref(args);
@@ -36,48 +35,6 @@ static Object length(Object args) {
   mpq_init(out.rational);
   mpq_set_ui(out.rational, i, 1);
   return out;
-}
-static Object string_ref(Object args) {
-  Object s = carref(args);
-  if (s.type == STRING_EMPTY) {
-    fprintf(stderr, "%s: STRING_EMPTY\n", __FUNCTION__);
-    exit(1);
-  }
-  if (s.type != STRING) {
-    fprintf(stderr, "%s: STRING\n", __FUNCTION__);
-    object_write_stdout(s);
-    puts("");
-    exit(1);
-  }
-  Object k = carref(cdrref(args));
-  size_t n = mpz_get_ui(mpq_numref(k.rational));
-  for (size_t i = 0; i < n; i++) {
-    s = cdrref(s);
-  }
-  if (carref(s).type != CHAR) {
-    fprintf(stderr, "%s: CHAR:\n", __FUNCTION__);
-    fprintf(stderr, "type: %d\n", carref(s).type);
-    object_writeln_stdout(carref(s));
-    fprintf(stderr, "type: %d\n", s.type);
-    object_writeln_stdout(s);
-    object_writeln_stdout(args);
-    puts("");
-    exit(1);
-  }
-  return carref(s);
-}
-static Object string_set(Object args) {
-  Object s = carref(args);
-  Object k = carref(cdrref(args));
-  Object c = carref(cdrref(cdrref(args)));
-
-  size_t n = mpz_get_ui(mpq_numref(k.rational));
-  Object o = s;
-  for (size_t i = 0; i < n; i++) {
-    o = cdrref(o);
-  }
-  set_car(o, c);
-  return undef;
 }
 static void write(Object o, FILE *s) {
   fprintf(s, "\"");
@@ -118,8 +75,7 @@ static void display(Object o, FILE *s) {
 }
 static void empty_display(Object o, FILE *s) { fprintf(s, ""); }
 
-/* for compiler */
-static Object c_list_to_string(Object args) {
+static Object list_to_string(Object args) {
   Object o = empty;
   for (argl = carref(argl); argl.type != EMPTY; argl = cdrref(argl)) {
     o = cons(carref(argl), o);
@@ -131,10 +87,16 @@ static Object c_list_to_string(Object args) {
   }
   return o;
 }
-static Object c_string_to_list(Object args) {
+static Object string_to_list(Object args) {
+  size_t start = mpz_get_ui(mpq_numref(carref(cdrref(argl)).rational));
+  size_t end = mpz_get_ui(mpq_numref(carref(cdrref(cdrref(argl))).rational));
   Object o = empty;
-  for (argl = carref(argl); argl.type != STRING_EMPTY; argl = cdrref(argl)) {
-    o = cons(carref(argl), o);
+  size_t i = 0;
+  for (argl = carref(argl); i != end; argl = cdrref(argl)) {
+    if (start <= i) {
+      o = cons(carref(argl), o);
+    }
+    i++;
   }
   argl = o;
   o = empty;
@@ -142,6 +104,265 @@ static Object c_string_to_list(Object args) {
     o = cons(carref(argl), o);
   }
   return o;
+}
+static Object string_length(Object args) {
+  size_t len = 0;
+  for (Object o = carref(argl); o.type != STRING_EMPTY; o = cdrref(o)) {
+    len++;
+  }
+  Object out = {.type = RATIONAL};
+  mpq_init(out.rational);
+  mpq_set_ui(out.rational, len, 1);
+  return out;
+}
+static Object string_to_number(Object args) {
+  size_t radix = mpz_get_ui(mpq_numref(carref(cdrref(argl)).rational));
+  Object o = carref(argl);
+  if (o.type != STRING_EMPTY && carref(o).ch == '#' &&
+      cdrref(o).type != STRING_EMPTY) {
+    gunichar ch = carref(cdrref(o)).ch;
+    if (ch == 'b' || ch == 'B') {
+      radix = 2;
+      o = cdrref(cdrref(o));
+    } else if (ch == 'o' || ch == 'O') {
+      radix = 8;
+      o = cdrref(cdrref(o));
+    } else if (ch == 'd' || ch == 'D') {
+      radix = 10;
+      o = cdrref(cdrref(o));
+    } else if (ch == 'x' || ch == 'X') {
+      radix = 16;
+      o = cdrref(cdrref(o));
+    }
+  }
+  size_t len = 0;
+  for (; o.type != STRING_EMPTY; o = cdrref(o)) {
+    len++;
+  }
+  if (radix != 10) {
+    len += 2;
+  }
+  gunichar str[len];
+  size_t i = 0;
+  if (radix == 2) {
+    str[i] = '#';
+    i++;
+    str[i] = 'b';
+    i++;
+  } else if (radix == 8) {
+    str[i] = '#';
+    i++;
+    str[i] = 'o';
+    i++;
+  } else if (radix == 16) {
+    str[i] = '#';
+    i++;
+    str[i] = 'x';
+    i++;
+  }
+  for (Object o = carref(argl); o.type != STRING_EMPTY; o = cdrref(o)) {
+    str[i] = carref(o).ch;
+    i++;
+  }
+  gchar *s = g_ucs4_to_utf8(str, len, NULL, NULL, NULL);
+  Object out = c_str_to_datum(s);
+  g_free(s);
+  if (out.type == COMPLEX || out.type == RATIONAL) {
+    return out;
+  }
+  object_free(&out);
+  return boolean_false;
+}
+static Object string_to_symbol(Object args) {
+  size_t len = 0;
+  for (Object o = carref(argl); o.type != STRING_EMPTY; o = cdrref(o)) {
+    len++;
+  }
+  gunichar str[len];
+  size_t i = 0;
+  for (Object o = carref(argl); o.type != STRING_EMPTY; o = cdrref(o)) {
+    str[i] = carref(o).ch;
+    i++;
+  }
+  gchar *s = g_ucs4_to_utf8(str, len, NULL, NULL, NULL);
+  Object out = symbol_new(s);
+  out.type = SYMBOL_VERTICAL;
+  g_free(s);
+  return out;
+}
+static Object string_to_utf8(Object args) {
+  size_t start = mpz_get_ui(mpq_numref(carref(cdrref(argl)).rational));
+  size_t end = mpz_get_ui(mpq_numref(carref(cdrref(cdrref(argl))).rational));
+  size_t len = end - start;
+  gunichar str[len];
+  size_t i = 0;
+  size_t j = 0;
+  for (Object o = carref(argl); j != end; o = cdrref(o)) {
+    if (start <= j) {
+      str[i] = carref(o).ch;
+      i++;
+    }
+    j++;
+  }
+  glong items_written;
+  uint8_t *bytes =
+      (uint8_t *)g_ucs4_to_utf8(str, len, NULL, &items_written, NULL);
+  Object out = cons((Object){.type = BYTEVECTOR_LENGTH, .len = items_written},
+                    (Object){.type = BYTES, .bytes = bytes});
+  out.type = BYTEVECTOR;
+  return out;
+}
+static Object string_ref(Object args) {
+  Object o = carref(argl);
+  size_t k = mpz_get_ui(mpq_numref(carref(cdrref(argl)).rational));
+  for (size_t i = 0; i < k; i++) {
+    o = cdrref(o);
+  }
+  return carref(o);
+}
+static Object string_set(Object args) {
+  Object s = carref(argl);
+  size_t k = mpz_get_ui(mpq_numref(carref(cdrref(argl)).rational));
+  Object c = carref(cdrref(cdrref(argl)));
+  Object o = s;
+  for (size_t i = 0; i < k; i++) {
+    o = cdrref(o);
+  }
+  set_car(o, c);
+  return undef;
+}
+static Object le_p(Object args) {
+  Object s1 = carref(argl);
+  Object s2 = carref(cdrref(argl));
+  for (;;) {
+    if (s1.type == STRING_EMPTY) {
+      return boolean_true;
+    }
+    if (s2.type == STRING_EMPTY) {
+      return boolean_false;
+    }
+    if (carref(s1).ch < carref(s2).ch) {
+      return boolean_true;
+    }
+    if (carref(s1).ch == carref(s2).ch) {
+      s1 = cdrref(s1);
+      s2 = cdrref(s2);
+    } else {
+      return boolean_false;
+    }
+  }
+}
+static Object lt_p(Object args) {
+  Object s1 = carref(argl);
+  Object s2 = carref(cdrref(argl));
+  for (;;) {
+    if (s1.type == STRING_EMPTY && s2.type == STRING_EMPTY) {
+      return boolean_false;
+    }
+    if (s1.type == STRING_EMPTY) {
+      return boolean_true;
+    }
+    if (s2.type == STRING_EMPTY) {
+      return boolean_false;
+    }
+    if (carref(s1).ch < carref(s2).ch) {
+      return boolean_true;
+    }
+    if (carref(s1).ch == carref(s2).ch) {
+      s1 = cdrref(s1);
+      s2 = cdrref(s2);
+    } else {
+      return boolean_false;
+    }
+  }
+}
+static Object math_equal_p(Object args) {
+  Object s1 = carref(argl);
+  Object s2 = carref(cdrref(argl));
+  for (;;) {
+    if (s1.type == STRING_EMPTY && s2.type == STRING_EMPTY) {
+      return boolean_true;
+    }
+    if (s1.type == STRING_EMPTY || s2.type != STRING_EMPTY) {
+      return boolean_false;
+    }
+    if (s2.type == STRING_EMPTY) {
+      return boolean_false;
+    }
+    if (carref(s1).ch == carref(s2).ch) {
+      s1 = cdrref(s1);
+      s2 = cdrref(s2);
+    } else {
+      return boolean_false;
+    }
+  }
+}
+static Object ge_p(Object args) {
+  Object s1 = carref(argl);
+  Object s2 = carref(cdrref(argl));
+  for (;;) {
+    if (s2.type == STRING_EMPTY) {
+      return boolean_true;
+    }
+    if (s1.type == STRING_EMPTY) {
+      return boolean_false;
+    }
+    if (carref(s1).ch > carref(s2).ch) {
+      return boolean_true;
+    }
+    if (carref(s1).ch == carref(s2).ch) {
+      s1 = cdrref(s1);
+      s2 = cdrref(s2);
+    } else {
+      return boolean_false;
+    }
+  }
+}
+static Object gt_p(Object args) {
+  Object s1 = carref(argl);
+  Object s2 = carref(cdrref(argl));
+  if (s1.type == STRING_EMPTY && s2.type == STRING_EMPTY) {
+    return boolean_false;
+  }
+  for (;;) {
+    if (s1.type == STRING_EMPTY && s2.type == STRING_EMPTY) {
+      return boolean_false;
+    }
+    if (s2.type == STRING_EMPTY) {
+      return boolean_true;
+    }
+    if (s1.type == STRING_EMPTY) {
+      return boolean_false;
+    }
+    if (carref(s1).ch > carref(s2).ch) {
+      return boolean_true;
+    }
+    if (carref(s1).ch == carref(s2).ch) {
+      s1 = cdrref(s1);
+      s2 = cdrref(s2);
+    } else {
+      return boolean_false;
+    }
+  }
+}
+static Object write_string(Object args) {
+  Object s = carref(argl);
+  FILE *port = carref(cdrref(argl)).port;
+  size_t start = mpz_get_ui(mpq_numref(carref(cdrref(cdrref(argl))).rational));
+  size_t end =
+      mpz_get_ui(mpq_numref(carref(cdrref(cdrref(cdrref(argl)))).rational));
+  for (size_t i = 0; i < start; i++) {
+    s = cdrref(s);
+  }
+  for (size_t i = start; i < end; i++) {
+    gunichar c = carref(s).ch;
+    char outbuf[7];
+    gint len = g_unichar_to_utf8(c, outbuf);
+    outbuf[len] = '\0';
+    fprintf(port, "%s", outbuf);
+    s = cdrref(s);
+  }
+  return undef;
 }
 #include "env.h"    // def_var_val
 #include "symbol.h" // symbol_new
@@ -164,26 +385,38 @@ void string_init() {
     put_of_obj_file(of_obj_file_ks1[i], STRING_EMPTY, of_obj_file_vs1[i]);
   }
 
-  char const *names[] = {"make-string", "string-length",  "string-ref",
-                         "string-set!", "c-list->string", "c-string->list",
-                         NULL};
-  fn_obj_of_obj procs[] = {make_string, length,           string_ref,
-                           string_set,  c_list_to_string, c_string_to_list,
+  char const *names[] = {"make-string",      "string-length",
+                         "string-ref",       "string-set!",
+                         "c-list->string",   "c-make-string",
+                         "c-string->list",   "c-string->number",
+                         "c-string->symbol", "c-string->utf8",
+                         "c-string-length",  "c-string-ref",
+                         "c-string-set!",    "c-string<=?",
+                         "c-string<?",       "c-string=?",
+                         "c-string>=?",      "c-string>?",
+                         "c-write-string",   NULL};
+  fn_obj_of_obj procs[] = {make_string,
+                           length,
+                           string_ref,
+                           string_set,
+                           list_to_string,
+                           make_string,
+                           string_to_list,
+                           string_to_number,
+                           string_to_symbol,
+                           string_to_utf8,
+                           string_length,
+                           string_ref,
+                           string_set,
+                           le_p,
+                           lt_p,
+                           math_equal_p,
+                           ge_p,
+                           gt_p,
+                           write_string,
                            NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));
   }
-}
-
-Object symbol_to_string(Object args) {
-  Object o = carref(args);
-  glong items_written = 0;
-  gunichar *s = g_utf8_to_ucs4(o.symbol, -1, NULL, &items_written, NULL);
-  Object out = (Object){.type = STRING_EMPTY};
-  for (size_t i = items_written; i != 0; i--) {
-    out = string_cons((Object){.type = CHAR, .ch = s[i - 1]}, out);
-  }
-  g_free(s);
-  return out;
 }

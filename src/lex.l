@@ -210,67 +210,23 @@ Object c_str_to_datum(char const *s) {
     return input_obj;
 }
 Object number_to_string(Object args) {
-    Object o1 = carref(args);
+    Object o1 = carref(argl);
     char *s = NULL;
     if (o1.type == COMPLEX) {        
-        asprintf(&s, "%lf%lfi", creal(o1.z), cimag(o1.z));
+        asprintf(&s, "%lf%f+lfi", creal(o1.z), cimag(o1.z));
         yy_scan_string(s);    
         yyparse();
         free(s);
     } else if (o1.type == RATIONAL) {
         if (mpz_cmp_ui(mpq_denref(o1.rational), 1) == 0) {
             gmp_asprintf(&s, "\"%Zd\"", mpq_numref(o1.rational));
-         } else {
+        } else {
             gmp_asprintf(&s, "\"%Qd\"", o1.rational);
-         }
+        }
         yy_scan_string(s);    
         yyparse();
         g_free(s);
     }
-    return input_obj;
-}
-Object string_to_symbol(Object args) {
-    Object o = carref(args);
-    size_t len = 0;
-    for (Object t = o; t.type != STRING_EMPTY; t = cdrref(t)) {
-        len++;
-    }
-    char s[6 * len + 2 + 1];
-    s[0] = '|';
-    size_t i = 1;
-    for (size_t j = 0; j < len; j++) {
-        Object t = carref(o);
-        if (t.ch == '|') {
-            s[i] = '\\';
-            s[i + 1] = '|';
-            i += 2;
-        } else if (t.ch == '\\') {
-            s[i] = '\\';
-            s[i+1] = 'x';
-            s[i+2] = '5';
-            s[i+3] = 'c';
-            s[i+4] = ';';
-            i += 5;
-        } else if (t.ch == '\0') {
-            s[i] = '\\';
-            s[i+1] = 'x';
-            s[i+2] = '0';
-            s[i+3] = ';';
-            i += 4;
-        } else {
-            char outbuf[6];
-            int len0 = g_unichar_to_utf8(t.ch, outbuf);
-            for (size_t k = 0; k < len0; k++) {
-                s[i + k] = outbuf[k];
-            }
-            i += len0;
-        }
-        o = cdrref(o);
-    }
-    s[i] = '|';
-    s[i + 1] = '\0';
-    yy_scan_string(s);
-    yyparse();
     return input_obj;
 }
 

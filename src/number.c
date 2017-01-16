@@ -23,9 +23,6 @@ Object number_infinite_p(Object args) {
 Object number_nan_p(Object args) {
   return apply_bool_of_obj(number_nan_p, args);
 }
-Object number_negative_p(Object args) {
-  return apply_bool_of_obj(number_negative_p, args);
-}
 Object number_lt(Object args) {
   Object o1 = carref(args);
   Object o2 = carref(cdrref(args));
@@ -67,16 +64,10 @@ Object number_div(Object args) {
 Object number_gcd(Object args) {
   return apply_obj_of_obj_obj(number_gcd, args);
 }
-Object number_lcm(Object args) {
-  return apply_obj_of_obj_obj(number_lcm, args);
-}
 static Object apply_obj_of_obj(fn_obj_of_obj fn, Object args) {
   Object o = carref(argl);
   fn_obj_of_obj fn0 = get_obj_of_obj(fn, o);
   return fn0(o);
-}
-Object number_inexact(Object args) {
-  return apply_obj_of_obj(number_inexact, args);
 }
 
 Object number_numerator(Object args) {
@@ -85,38 +76,98 @@ Object number_numerator(Object args) {
 Object number_denominator(Object args) {
   return apply_obj_of_obj(number_denominator, args);
 }
-Object number_floor(Object args) {
-  return apply_obj_of_obj(number_floor, args);
-}
 Object number_ceiling(Object args) {
-  return apply_obj_of_obj(number_floor, args);
-}
-Object number_truncate(Object args) {
-  return apply_obj_of_obj(number_floor, args);
+  return apply_obj_of_obj(number_ceiling, args);
 }
 
-Object number_round(Object args) {
-  return apply_obj_of_obj(number_floor, args);
-}
 Object number_sqrt(Object args) { return apply_obj_of_obj(number_sqrt, args); }
+Object number_even_p(Object args) {
+  return apply_obj_of_obj(number_even_p, args);
+}
 Object number_exact(Object args) {
   return apply_obj_of_obj(number_exact, args);
 }
-
+Object number_expt(Object args) {
+  return apply_obj_of_obj_obj(number_expt, args);
+}
+Object number_floor(Object args) {
+  return apply_obj_of_obj(number_floor, args);
+}
+Object number_inexact(Object args) {
+  return apply_obj_of_obj(number_inexact, args);
+}
+Object number_to_char(Object args) {
+  return apply_obj_of_obj(number_to_char, args);
+}
+Object number_lcm(Object args) {
+  return apply_obj_of_obj_obj(number_lcm, args);
+}
+Object number_negative_p(Object args) {
+  return apply_obj_of_obj(number_negative_p, args);
+}
+Object number_odd_p(Object args) {
+  return apply_obj_of_obj(number_odd_p, args);
+}
+Object number_positive_p(Object args) {
+  return apply_obj_of_obj(number_positive_p, args);
+}
+Object number_round(Object args) {
+  return apply_obj_of_obj(number_round, args);
+}
+Object number_square(Object args) {
+  return apply_obj_of_obj(number_square, args);
+}
+Object number_truncate(Object args) {
+  return apply_obj_of_obj(number_truncate, args);
+}
 #include "env.h"
 #include "symbol.h" // symbol_new
 void number_init() {
-  char const *names[] = {"+", "-", "negative?", "<", "number->string",
-                         /*  */
-                         "=", "c-=", "c-+", "c-*", "c--", "c-<", "c-/",
-                         "c-inexact", "c-exact?", "inexact", "exact?",
-                         "c-ceiling",NULL};
+  char const *names[] = {"+",
+                         "-",
+                         "<",
+                         "number->string",
+                         "=",
+                         "c-=",
+                         "c-+",
+                         "c-*",
+                         "c--",
+                         "c-<",
+                         "c-/",
+                         "inexact",
+                         "exact?",
+                         "c-ceiling",
+                         "c-denominator",
+                         "c-even?",
+                         "c-exact",
+                         "c-exact?",
+                         "c-expt",
+                         "c-floor",
+                         "c-gcd",
+                         "c-inexact",
+                         "c-integer->char",
+                         "c-lcm",
+                         "c-negative?",
+                         "c-number->string",
+                         "c-numerator",
+                         "c-odd?",
+                         "c-positive?",
+                         "c-round",
+                         "c-square",
+                         "c-truncate",
+                         NULL};
   fn_obj_of_obj procs[] = {
-      number_add, number_sub, number_negative_p, number_lt, number_to_string,
-      /*  */
-      number_math_equal, number_math_equal, number_add, number_mul, number_sub,
-      number_lt, number_div, number_inexact, number_exact_p, number_inexact,
-      number_exact_p, number_ceiling, NULL};
+      number_add,        number_sub,        number_lt,
+      number_to_string,  number_math_equal, number_math_equal,
+      number_add,        number_mul,        number_sub,
+      number_lt,         number_div,        number_inexact,
+      number_exact_p,    number_ceiling,    number_denominator,
+      number_even_p,     number_exact,      number_exact_p,
+      number_expt,       number_floor,      number_gcd,
+      number_inexact,    number_to_char,    number_lcm,
+      number_negative_p, number_to_string,  number_numerator,
+      number_odd_p,      number_positive_p, number_round,
+      number_square,     number_truncate,   NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

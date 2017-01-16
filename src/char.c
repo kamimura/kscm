@@ -71,13 +71,6 @@ static Object digit_value(Object args) {
   mpq_set_ui(o.rational, n, 1);
   return o;
 }
-static Object to_integer(Object args) {
-  gunichar ch = carref(args).ch;
-  Object o = {.type = RATIONAL};
-  mpq_init(o.rational);
-  mpq_set_ui(o.rational, ch, 1);
-  return o;
-}
 static Object integer_to_char(Object args) {
   Object o = carref(args);
   gunichar ch = mpz_get_ui(mpq_numref(o.rational));
@@ -102,11 +95,40 @@ static Object foldcase(Object args) {
   g_free(s);
   return o;
 }
-static Object char_to_integer(Object args) {
-  Object out = {.type=RATIONAL};
+static Object to_integer(Object args) {
+  Object out = {.type = RATIONAL};
   mpq_init(out.rational);
   mpq_set_ui(out.rational, carref(argl).ch, 1);
   return out;
+}
+static Object le_p(Object args) {
+  return carref(argl).ch <= carref(cdrref(argl)).ch ? boolean_true
+                                                    : boolean_false;
+}
+static Object lt_p(Object args) {
+  return carref(argl).ch < carref(cdrref(argl)).ch ? boolean_true
+                                                   : boolean_false;
+}
+static Object math_equal_p(Object args) {
+  return carref(argl).ch == carref(cdrref(argl)).ch ? boolean_true
+                                                    : boolean_false;
+}
+static Object ge_p(Object args) {
+  return carref(argl).ch >= carref(cdrref(argl)).ch ? boolean_true
+                                                    : boolean_false;
+}
+static Object gt_p(Object args) {
+  return carref(argl).ch > carref(cdrref(argl)).ch ? boolean_true
+                                                   : boolean_false;
+}
+static Object write_char(Object args) {
+  gunichar c = carref(argl).ch;
+  FILE *port = carref(cdrref(argl)).port;
+  char outbuf[7];
+  gint len = g_unichar_to_utf8(c, outbuf);
+  outbuf[len] = '\0';
+  fprintf(port, "%s", outbuf);
+  return undef;
 }
 #include "env.h"
 #include "symbol.h"
@@ -123,15 +145,31 @@ void char_init() {
   }
 
   /* add env */
-  char const *names[] = {
-      "char-alphabetic?", "char-numeric?",    "char-whitespace?",
-      "char-upper-case?", "char-lower-case?", "digit-value",
-      "char->integer",    "integer->char",    "char-upcase",
-      "char-downcase",    "char-foldcase",    "c-char->integer", NULL};
-  fn_obj_of_obj procs[] = {alphabetic_p, numeric_p,       whitespace_p,
-                           upper_case_p, lower_case_p,    digit_value,
-                           to_integer,   integer_to_char, upcase,
-                           downcase,     foldcase,        char_to_integer, NULL};
+  char const *names[] = {"char-alphabetic?",
+                         "char-numeric?",
+                         "char-whitespace?",
+                         "char-upper-case?",
+                         "char-lower-case?",
+                         "digit-value",
+                         "char->integer",
+                         "integer->char",
+                         "char-upcase",
+                         "char-downcase",
+                         "char-foldcase",
+                         "c-char->integer",
+                         "c-char<=?",
+                         "c-char<?",
+                         "c-char=?",
+                         "c-char>=?",
+                         "c-char>?",
+                         "c-write-char",
+                         NULL};
+  fn_obj_of_obj procs[] = {
+      alphabetic_p, numeric_p,   whitespace_p, upper_case_p,
+      lower_case_p, digit_value, to_integer,   integer_to_char,
+      upcase,       downcase,    foldcase,     to_integer,
+      le_p,         lt_p,        math_equal_p, ge_p,
+      gt_p,         write_char,  NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

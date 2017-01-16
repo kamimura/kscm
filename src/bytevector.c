@@ -105,7 +105,7 @@ static Object bytevector_u8_ref(Object args) {
   Object bv = carref(argl);
   Object o = carref(cdrref(argl));
   size_t k = mpz_get_ui(mpq_numref(o.rational));
-  Object out = {.type=RATIONAL};
+  Object out = {.type = RATIONAL};
   mpq_init(out.rational);
   mpq_set_ui(out.rational, cdrref(bv).bytes[k], 1);
   return out;
@@ -117,6 +117,50 @@ static Object bytevector_u8_set(Object args) {
   Object b = carref(cdrref(cdrref(argl)));
   size_t k = mpz_get_ui(mpq_numref(o.rational));
   bs.bytes[k] = (uint8_t)mpz_get_ui(mpq_numref(b.rational));
+  return undef;
+}
+static Object make_bytevector(Object args) {
+  size_t k = mpz_get_ui(mpq_numref(carref(argl).rational));
+  uint8_t byte = mpz_get_ui(mpq_numref(carref(cdrref(argl)).rational));
+  uint8_t *bytes = malloc(sizeof(uint8_t) * k);
+  for (size_t i = 0; i < k; i++) {
+    bytes[i] = byte;
+  }
+  Object out = cons((Object){.type = BYTEVECTOR_LENGTH, .len = k},
+                    (Object){.type = BYTES, .bytes = bytes});
+  out.type = BYTEVECTOR;
+  return out;
+}
+#include "scm_string.h" // string_cons
+static Object utf8_to_string(Object args) {
+  Object bv = carref(argl);
+  gunichar *us = g_utf8_to_ucs4((gchar *)cdrref(bv).bytes, carref(bv).len, NULL,
+                                NULL, NULL);
+  size_t start = mpz_get_ui(mpq_numref(carref(cdrref(argl)).rational));
+  size_t end = mpz_get_ui(mpq_numref(carref(cdrref(cdrref(argl))).rational));
+  Object out = {.type = STRING_EMPTY};
+  for (size_t i = end; i > start; i--) {
+    out = string_cons((Object){.type = CHAR, .ch = us[i - 1]}, out);
+  }
+  g_free(us);
+  return out;
+}
+static Object write_bytevector(Object args) {
+  Object bv = carref(argl);
+  uint8_t *bytes = cdrref(bv).bytes;
+  FILE *port = carref(cdrref(argl)).port;
+  size_t start = mpz_get_ui(mpq_numref(carref(cdrref(cdrref(argl))).rational));
+  size_t end =
+      mpz_get_ui(mpq_numref(carref(cdrref(cdrref(cdrref(argl)))).rational));
+  for (size_t i = start; i < end; i++) {
+    fprintf(port, "%c", bytes[i]);
+  }
+  return undef;
+}
+static Object write_u8(Object args) {
+  uint8_t byte = mpz_get_ui(mpq_numref(carref(argl).rational));
+  FILE *port = carref(cdrref(argl)).port;
+  fprintf(port, "%c", byte);
   return undef;
 }
 void bytevector_init() {
@@ -136,12 +180,28 @@ void bytevector_init() {
   for (size_t i = 0; of_obj_file_ks[i] != NULL; i++) {
     put_of_obj_file(of_obj_file_ks[i], BYTEVECTOR, of_obj_file_vs[i]);
   }
-  char const *names[] = {"c-bytevector", "c-bytevector-append",
-                         "c-bytevector-copy", "c-bytevector-length",
-                         "c-bytevector-u8-ref", "c-bytevector-u8-set!", NULL};
-  fn_obj_of_obj procs[] = {bytevector, bytevector_append, bytevector_copy,
-                           bytevector_length, bytevector_u8_ref,
-                           bytevector_u8_set, NULL};
+  char const *names[] = {"c-bytevector",
+                         "c-bytevector-append",
+                         "c-bytevector-copy",
+                         "c-bytevector-length",
+                         "c-bytevector-u8-ref",
+                         "c-bytevector-u8-set!",
+                         "c-make-bytevector",
+                         "c-utf8->string",
+                         "c-write-bytevector",
+                         "c-write-u8",
+                         NULL};
+  fn_obj_of_obj procs[] = {bytevector,
+                           bytevector_append,
+                           bytevector_copy,
+                           bytevector_length,
+                           bytevector_u8_ref,
+                           bytevector_u8_set,
+                           make_bytevector,
+                           utf8_to_string,
+                           write_bytevector,
+                           write_u8,
+                           NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

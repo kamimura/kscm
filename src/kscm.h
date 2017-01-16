@@ -16,6 +16,7 @@ typedef Object (*fn_obj_of_obj)(Object);
 
 #include <glib.h>
 #include <gmp.h>
+#include <mpfr.h>
 
 enum Type {
   NONE,

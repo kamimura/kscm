@@ -39,12 +39,6 @@ static Object length(Object args) {
   return out;
 }
 static Object list(Object args) { return args; }
-static Object pair_set_car(Object args) {
-  return apply_of_obj_obj(set_car, args);
-}
-static Object pair_set_cdr(Object args) {
-  return apply_of_obj_obj(set_cdr, args);
-}
 static Object index(Object args) {
   Object out = {.type = RATIONAL};
   mpq_init(out.rational);
@@ -104,6 +98,23 @@ static Object c_append(Object args) {
 }
 static Object c_car(Object args) { return car(carref(argl)); }
 static Object c_cdr(Object args) { return cdr(carref(argl)); }
+
+static Object make_list(Object args) {
+  size_t k = mpz_get_ui(mpq_numref(carref(argl).rational));
+  argl = carref(cdrref(argl));
+  Object out = empty;
+  for (size_t i = 0; i < k; i++) {
+    out = cons(object_copy(argl), out);
+  }
+  return out;
+}
+static Object pair_set_car(Object args) {
+  return apply_of_obj_obj(set_car, args);
+}
+static Object pair_set_cdr(Object args) {
+  return apply_of_obj_obj(set_cdr, args);
+}
+
 #include "env.h"    // def_var_val
 #include "symbol.h" // symbol_new
 void pair_init() {
@@ -114,15 +125,17 @@ void pair_init() {
   }
 
   char const *names[] = {
-      "cons",     "car",       "cdr",      "list",    "c-index", "set-car!",
-      "set-cdr!", "length",    "c-cons",   "c-car",   "c-cdr",   "c-length",
-      "c-cadr",   "c-cddr",    "c-caddr",  "c-caadr", "c-cdadr", "c-cdddr",
-      "c-cadddr", "c-reverse", "c-append", NULL};
+      "cons",     "car",         "cdr",        "list",       "c-index",
+      "set-car!", "set-cdr!",    "length",     "c-cons",     "c-car",
+      "c-cdr",    "c-length",    "c-cadr",     "c-cddr",     "c-caddr",
+      "c-caadr",  "c-cdadr",     "c-cdddr",    "c-cadddr",   "c-reverse",
+      "c-append", "c-make-list", "c-set-car!", "c-set-cdr!", NULL};
   fn_obj_of_obj procs[] = {
-      pair_cons,    pair_car,  pair_cdr, list,    index,   pair_set_car,
-      pair_set_cdr, length,    c_cons,   c_car,   c_cdr,   length,
-      c_cadr,       c_cddr,    c_caddr,  c_caadr, c_cdadr, c_cdddr,
-      c_cadddr,     c_reverse, c_append, NULL};
+      pair_cons,    pair_car,     pair_cdr,     list,         index,
+      pair_set_car, pair_set_cdr, length,       c_cons,       c_car,
+      c_cdr,        length,       c_cadr,       c_cddr,       c_caddr,
+      c_caadr,      c_cdadr,      c_cdddr,      c_cadddr,     c_reverse,
+      c_append,     make_list,    pair_set_car, pair_set_cdr, NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

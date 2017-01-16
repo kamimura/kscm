@@ -267,6 +267,24 @@ static Object c_string_to_c(Object args) {
   g_hash_table_insert(tb, s, s);
   return cons((Object){.type = SYMBOL_VERTICAL, .symbol = s}, empty);
 }
+#include "scm_string.h" // string_cons
+static Object to_string(Object args) {
+  Object o = carref(argl);
+  glong items_written = 0;
+  gunichar *s = g_utf8_to_ucs4(o.symbol, -1, NULL, &items_written, NULL);
+  Object out = (Object){.type = STRING_EMPTY};
+  for (size_t i = items_written; i != 0; i--) {
+    out = string_cons((Object){.type = CHAR, .ch = s[i - 1]}, out);
+  }
+  g_free(s);
+  return out;
+}
+static Object math_equal_p(Object args) {
+  Object s1 = carref(argl);
+  Object s2 = carref(cdrref(argl));
+  return s1.symbol == s2.symbol ? boolean_true : boolean_false;
+}
+
 void symbol_init() {
   fn_obj_of_obj ks1[] = {object_eqv_p, object_eq_p, NULL};
   fn_bool_of_obj_obj vs1[] = {eqv_p, eqv_p, NULL};
@@ -283,10 +301,10 @@ void symbol_init() {
     put_of_obj_file(of_obj_file_ks[i], SYMBOL, of_obj_file_vs1[i]);
     put_of_obj_file(of_obj_file_ks[i], SYMBOL_VERTICAL, of_obj_file_vs2[i]);
   }
-  char const *names[] = {"symbol->string", "string->symbol", "c-symbol->c",
-                         "c-string->c", NULL};
-  fn_obj_of_obj procs[] = {symbol_to_string, string_to_symbol, c_symbol_to_c,
-                           c_string_to_c, NULL};
+  char const *names[] = {"c-symbol->c", "c-string->c", "c-symbol->string",
+                         "c-symbol=?", NULL};
+  fn_obj_of_obj procs[] = {c_symbol_to_c, c_string_to_c, to_string,
+                           math_equal_p, NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

@@ -40,6 +40,8 @@ OBJS += byte.o
 ksc: sample.scm libkscm
 	./ksc sample
 	./sample sample
+	cp sample ksc
+	cp sample.scm ksc.scm
 
 ksi: ksi.scm libkscm
 	./ksc ksi
@@ -63,11 +65,11 @@ boolean.o: object.h boolean.h boolean.c
 
 env.o: object.h env.h env.c
 
-symbol.o: object.h symbol.h symbol.c
+symbol.o: object.h scm_string.h symbol.h symbol.c
 
 number.o: object.h number.h number.c
 
-bytevector.o: object.h bytevector.h bytevector.c
+bytevector.o: object.h scm_string.h bytevector.h bytevector.c
 
 char.o: object.h char.h char.c
 

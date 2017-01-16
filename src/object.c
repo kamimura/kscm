@@ -197,16 +197,8 @@ Object object_eqv_p(Object args) {
 Object object_eq_p(Object args) {
   return apply_bool_of_obj_obj(object_eq_p, args);
 }
-static Object c_eq_p(Object args) {
-  return apply_bool_of_obj_obj(object_eq_p, args);
-}
 static Object complex_p(Object args) {
-  Type t = carref(args).type;
-  return t == COMPLEX || t == RATIONAL || t == BYTE ? boolean_true
-                                                    : boolean_false;
-}
-static Object c_complex_p(Object args) {
-  Type t = carref(args).type;
+  Type t = carref(argl).type;
   return t == COMPLEX || t == RATIONAL || t == BYTE ? boolean_true
                                                     : boolean_false;
 }
@@ -218,28 +210,6 @@ Object object_integer_p(Object args) {
   }
   return boolean_false;
 }
-static Object c_real_p(Object args) {
-  Type t = carref(argl).type;
-  if (t == COMPLEX) {
-    return cimag(carref(argl).z) == 0 ? boolean_true : boolean_false;
-  }
-  if (t == RATIONAL) {
-    return boolean_true;
-  }
-  return boolean_false;
-}
-static Object c_list_p(Object args) {
-  Object o = carref(argl);
-  if (o.type == EMPTY) {
-    return boolean_true;
-  }
-  if (o.type == PAIR) {
-    for (; o.type == PAIR; o = cdrref(o)) {
-    }
-    return o.type == EMPTY ? boolean_true : boolean_false;
-  }
-  return boolean_false;
-}
 static Object boolean_p(Object args) {
   return carref(args).type == BOOLEAN ? boolean_true : boolean_false;
 }
@@ -247,7 +217,7 @@ static Object c_boolean_p(Object args) {
   return carref(args).type == BOOLEAN ? boolean_true : boolean_false;
 }
 static Object symbol_p(Object args) {
-  Type t = carref(args).type;
+  Type t = carref(argl).type;
   return t == SYMBOL || t == SYMBOL_VERTICAL ? boolean_true : boolean_false;
 }
 static Object not(Object args) {
@@ -259,18 +229,10 @@ static Object not(Object args) {
 static Object null_p(Object args) {
   return carref(args).type == EMPTY ? boolean_true : boolean_false;
 }
-static Object pair_p(Object args) {
-  return carref(args).type == PAIR ? boolean_true : boolean_false;
-}
 /* Characters */
 static Object char_p(Object args) {
-  Type t = carref(args).type;
+  Type t = carref(argl).type;
   return t == CHAR ? boolean_true : boolean_false;
-}
-/* Strings */
-static Object string_p(Object args) {
-  Type t = carref(args).type;
-  return t == STRING ? boolean_true : boolean_false;
 }
 /* Vectors */
 static Object vector_p(Object args) {
@@ -282,39 +244,24 @@ static Object bytevector_p(Object args) {
 }
 
 /* Control features */
-static Object c_procedure_p(Object args) {
-  Type t = carref(args).type;
-  return t == PROC_APPLY || t == PROC || t == PROC_COMPILED ? boolean_true
-                                                            : boolean_false;
-}
 static Object procedure_p(Object args) {
-  Type t = carref(args).type;
+  Type t = carref(argl).type;
   return t == PROC_APPLY || t == PROC || t == PROC_COMPILED ? boolean_true
                                                             : boolean_false;
 }
 /* Input and output */
 static Object input_port_p(Object args) {
-  Type t = carref(args).type;
+  Type t = carref(argl).type;
   return t == PORT_INPUT_TEXT || t == PORT_INPUT_BIN ? boolean_true
                                                      : boolean_false;
 }
 static Object output_port_p(Object args) {
-  Type t = carref(args).type;
+  Type t = carref(argl).type;
   return t == PORT_OUTPUT_TEXT || t == PORT_OUTPUT_BIN ? boolean_true
                                                        : boolean_false;
 }
-static Object textual_port_p(Object args) {
-  Type t = carref(args).type;
-  return t == PORT_INPUT_TEXT || t == PORT_OUTPUT_TEXT ? boolean_true
-                                                       : boolean_false;
-}
 static Object binary_port_p(Object args) {
-  Type t = carref(args).type;
-  return t == PORT_INPUT_BIN || t == PORT_OUTPUT_BIN ? boolean_true
-                                                     : boolean_false;
-}
-static Object c_binary_port_p(Object args) {
-  Type t = carref(args).type;
+  Type t = carref(argl).type;
   return t == PORT_INPUT_BIN || t == PORT_OUTPUT_BIN ? boolean_true
                                                      : boolean_false;
 }
@@ -431,29 +378,59 @@ void object_writeln_stdout(Object o) {
   puts("");
 }
 static Object object_newline(Object args) {
-  size_t len = argl_length();
-  if (len == 0) {
-    fprintf(cur_output, "\n");
-    return undef;
-  }
-  if (len == 1) {
-    Object o = carref(argl);
-    FILE *t = cur_output;
-    cur_output = o.port;
-    fprintf(o.port, "\n");
-    cur_output = t;
-    return undef;
-  }
-  argl_length_error("newline");
+  fprintf(carref(argl).port, "\n");
   return undef;
 }
+static Object list_p(Object args) {
+  Object o = carref(argl);
+  if (o.type == EMPTY) {
+    return boolean_true;
+  }
+  if (o.type == PAIR) {
+    for (; o.type == PAIR; o = cdrref(o)) {
+    }
+    return o.type == EMPTY ? boolean_true : boolean_false;
+  }
+  return boolean_false;
+}
+static Object pair_p(Object args) {
+  return carref(args).type == PAIR ? boolean_true : boolean_false;
+}
+static Object port_p(Object args) {
+  Type t = carref(argl).type;
+  return t == PORT_INPUT_TEXT || t == PORT_INPUT_BIN || t == PORT_OUTPUT_TEXT ||
+                 t == PORT_OUTPUT_BIN || t == PORT_ERROR_TEXT
+             ? boolean_true
+             : boolean_false;
+}
+
+static Object real_p(Object args) {
+  Type t = carref(argl).type;
+  if (t == COMPLEX) {
+    return cimag(carref(argl).z) == 0 ? boolean_true : boolean_false;
+  }
+  if (t == RATIONAL) {
+    return boolean_true;
+  }
+  return boolean_false;
+}
+static Object string_p(Object args) {
+  Type t = carref(argl).type;
+  return t == STRING || t == STRING_EMPTY ? boolean_true : boolean_false;
+}
+
+static Object textual_port_p(Object args) {
+  Type t = carref(argl).type;
+  return t == PORT_INPUT_TEXT || t == PORT_OUTPUT_TEXT ? boolean_true
+                                                       : boolean_false;
+}
+
 void object_init() {
   char const *names[] = {"eqv?",
                          "eq?",
                          "number?",
                          "complex?",
                          "boolean?",
-                         "symbol?",
                          "pair?",
                          "null?",
                          "char?",
@@ -471,29 +448,79 @@ void object_init() {
                          "display",
                          "newline",
                          "c-null?",
-                         "c-pair?",
                          "eof-object?",
-                         "c-number?",
-                         "c-real?",
-                         "c-list?",
                          "c-procedure?",
                          "c-binary-port?",
                          "c-boolean?",
                          "c-eq?",
-                         "c-integer?",
                          "c-bytevector?",
                          "c-char?",
+                         "c-complex?",
+                         "c-input-port?",
+                         "c-eof-object?",
+                         "c-eq?",
+                         "c-eqv?",
+                         "c-integer?",
+                         "c-list?",
+                         "c-newline",
+                         "c-pair?",
+                         "c-vector?",
+                         "c-number?",
+                         "c-output-port?",
+                         "c-port?",
+                         "c-real?",
+                         "c-string?",
+                         "c-symbol?",
+                         "c-textual-port?",
                          NULL};
-  fn_obj_of_obj procs[] = {
-      object_eqv_p,     object_eq_p,     complex_p,    complex_p,
-      boolean_p,        symbol_p,        pair_p,       null_p,
-      char_p,           string_p,        vector_p,     bytevector_p,
-      procedure_p,      error,           input_port_p, output_port_p,
-      textual_port_p,   binary_port_p,   not,          object_write,
-      object_display,   object_newline,  null_p,       pair_p,
-      eof_object_p,     c_complex_p,     c_real_p,     c_list_p,
-      c_procedure_p,    c_binary_port_p, c_boolean_p,  c_eq_p,
-      object_integer_p, bytevector_p,    char_p,NULL};
+  fn_obj_of_obj procs[] = {object_eqv_p,
+                           object_eq_p,
+                           complex_p,
+                           complex_p,
+                           boolean_p,
+                           pair_p,
+                           null_p,
+                           char_p,
+                           string_p,
+                           vector_p,
+                           bytevector_p,
+                           procedure_p,
+                           error,
+                           input_port_p,
+                           output_port_p,
+                           textual_port_p,
+                           binary_port_p,
+                           not,
+                           object_write,
+                           object_display,
+                           object_newline,
+                           null_p,
+                           eof_object_p,
+                           procedure_p,
+                           binary_port_p,
+                           c_boolean_p,
+                           object_eq_p,
+                           bytevector_p,
+                           char_p,
+                           complex_p,
+                           input_port_p,
+                           eof_object_p,
+                           object_eq_p,
+                           object_eqv_p,
+                           object_integer_p,
+                           list_p,
+                           object_newline,
+                           pair_p,
+                           vector_p,
+                           complex_p,
+                           output_port_p,
+                           port_p,
+
+                           real_p,
+                           string_p,
+                           symbol_p,
+                           textual_port_p,
+                           NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

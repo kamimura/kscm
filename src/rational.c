@@ -25,9 +25,6 @@ static bool integer_p(Object o) {
 static bool finite_p(Object o) { return true; }
 static bool infinite_p(Object o) { return false; }
 static bool nan_p(Object o) { return false; }
-static bool negative_p(Object o) {
-  return mpq_sgn(o.rational) < 0 ? true : false;
-}
 static Object math_equal(Object o1, Object o2) {
   return mpq_equal(o1.rational, o2.rational) ? boolean_true : boolean_false;
 }
@@ -53,34 +50,17 @@ static Object sub(Object o1, Object o2) {
 static Object rational_div(Object o1, Object o2) {
   return apply_void_mp_mp_mp(mpq_div, o1, o2);
 }
-static Object gcd(Object o1, Object o2) {
-  Object o = {.type = RATIONAL};
-  mpq_init(o.rational);
-  mpz_gcd(mpq_numref(o.rational), mpq_numref(o1.rational),
-          mpq_numref(o2.rational));
-  mpz_set_ui(mpq_denref(o.rational), 1);
-  return o;
-}
-static Object lcm(Object o1, Object o2) {
-  Object o = {.type = RATIONAL};
-  mpq_init(o.rational);
-  mpz_lcm(mpq_numref(o.rational), mpq_numref(o1.rational),
-          mpq_numref(o2.rational));
-  mpz_set_ui(mpq_denref(o.rational), 1);
-  return o;
-}
-
 static Object numerator(Object o) {
   Object out = {.type = RATIONAL};
   mpq_init(out.rational);
   mpq_set_z(out.rational, mpq_numref(o.rational));
-  return o;
+  return out;
 }
 static Object denominator(Object o) {
   Object out = {.type = RATIONAL};
   mpq_init(out.rational);
   mpq_set_z(out.rational, mpq_denref(o.rational));
-  return o;
+  return out;
 }
 static Object rational_floor(Object o) {
   Object out = {.type = RATIONAL};
@@ -88,7 +68,7 @@ static Object rational_floor(Object o) {
   mpz_fdiv_q(mpq_numref(out.rational), mpq_numref(o.rational),
              mpq_denref(o.rational));
   mpz_set_ui(mpq_denref(out.rational), 1);
-  return o;
+  return out;
 }
 static Object ceiling(Object o) {
   Object out = {.type = RATIONAL};
@@ -96,7 +76,7 @@ static Object ceiling(Object o) {
   mpz_cdiv_q(mpq_numref(out.rational), mpq_numref(o.rational),
              mpq_denref(o.rational));
   mpz_set_ui(mpq_denref(out.rational), 1);
-  return o;
+  return out;
 }
 static Object truncate(Object o) {
   Object out = {.type = RATIONAL};
@@ -104,13 +84,6 @@ static Object truncate(Object o) {
   mpz_tdiv_q(mpq_numref(out.rational), mpq_numref(o.rational),
              mpq_denref(o.rational));
   mpz_set_ui(mpq_denref(out.rational), 1);
-  return o;
-}
-static Object rational_round(Object o) {
-  double d = round(mpq_get_d(o.rational));
-  Object out = {.type = RATIONAL};
-  mpq_init(out.rational);
-  mpq_set_d(out.rational, d);
   return out;
 }
 static Object to_complex(Object o) {
@@ -135,6 +108,57 @@ static Object rational_sqrt(Object o) {
   return out;
 }
 static void write(Object o, FILE *port) { mpq_out_str(port, 10, o.rational); }
+static Object even_p(Object o) {
+  return mpz_even_p(mpq_numref(o.rational)) ? boolean_true : boolean_false;
+}
+static Object exact(Object o) { return rational_copy(o); }
+static Object expt(Object o1, Object o2) {
+  return (Object){.type = COMPLEX,
+                  .z = cpow(mpq_get_d(o1.rational), mpq_get_d(o2.rational))};
+}
+static Object gcd(Object o1, Object o2) {
+  Object out = {.type = RATIONAL};
+  mpq_init(out.rational);
+  mpz_gcd(mpq_numref(out.rational), mpq_numref(o1.rational),
+          mpq_numref(o2.rational));
+  mpz_set_ui(mpq_denref(out.rational), 1);
+  return out;
+}
+static Object to_char(Object o) {
+  return (Object){.type = CHAR, .ch = mpz_get_ui(mpq_numref(o.rational))};
+}
+static Object lcm(Object o1, Object o2) {
+  Object out = {.type = RATIONAL};
+  mpq_init(out.rational);
+  mpz_lcm(mpq_numref(out.rational), mpq_numref(o1.rational),
+          mpq_numref(o2.rational));
+  mpz_set_ui(mpq_denref(out.rational), 1);
+  return out;
+}
+static Object negative_p(Object o) {
+  return mpq_sgn(o.rational) == -1 ? boolean_true : boolean_false;
+}
+static Object odd_p(Object o) {
+  return mpz_odd_p(mpq_numref(o.rational)) ? boolean_true : boolean_false;
+}
+static Object positive_p(Object o) {
+  return mpq_sgn(o.rational) == 1 ? boolean_true : boolean_false;
+}
+static mpfr_t opfr;
+static Object rational_round(Object o) {
+  Object out = {.type = RATIONAL};
+  mpq_init(out.rational);
+  mpfr_set_q(opfr, o.rational, MPFR_RNDN);
+  mpfr_get_z(mpq_numref(out.rational), opfr, MPFR_RNDN);
+  mpz_set_ui(mpq_denref(out.rational), 1);
+  return out;
+}
+static Object square(Object o) {
+  Object out = {.type = RATIONAL};
+  mpq_init(out.rational);
+  mpq_mul(out.rational, o.rational, o.rational);
+  return out;
+}
 void rational_init() {
   fn_obj_of_obj ks1[] = {object_eqv_p, object_eq_p, number_lt, NULL};
   fn_bool_of_obj_obj vs1[] = {eqv_p, eqv_p, lt, NULL};
@@ -142,24 +166,20 @@ void rational_init() {
     put_bool_of_obj_obj(ks1[i], RATIONAL, RATIONAL, vs1[i]);
   }
 
-  fn_obj_of_obj bool_of_obj_ks[] = {object_integer_p,
-                                    number_exact_p,
-                                    number_finite_p,
-                                    number_infinite_p,
-                                    number_nan_p,
-                                    number_negative_p,
-                                    NULL};
+  fn_obj_of_obj bool_of_obj_ks[] = {object_integer_p, number_exact_p,
+                                    number_finite_p,  number_infinite_p,
+                                    number_nan_p,     NULL};
 
-  fn_bool_of_obj bool_of_obj_vs[] = {
-      integer_p, exact_p, finite_p, infinite_p, nan_p, negative_p, NULL};
+  fn_bool_of_obj bool_of_obj_vs[] = {integer_p,  exact_p, finite_p,
+                                     infinite_p, nan_p,   NULL};
   for (size_t i = 0; bool_of_obj_ks[i] != NULL; i++) {
     put_bool_of_obj(bool_of_obj_ks[i], RATIONAL, bool_of_obj_vs[i]);
   }
   fn_obj_of_obj obj_of_obj_obj_ks[] = {
-      number_math_equal, number_add, number_mul, number_sub,
-      number_div,        number_gcd, number_lcm, NULL};
-  fn_obj_of_obj_obj obj_of_obj_obj_vs[] = {math_equal,   add, mul, sub,
-                                           rational_div, gcd, lcm, NULL};
+      number_math_equal, number_add, number_mul, number_sub, number_div,
+      number_expt,       number_gcd, number_lcm, NULL};
+  fn_obj_of_obj_obj obj_of_obj_obj_vs[] = {
+      math_equal, add, mul, sub, rational_div, expt, gcd, lcm, NULL};
   for (size_t i = 0; obj_of_obj_obj_ks[i] != NULL; i++) {
     put_obj_of_obj_obj(obj_of_obj_obj_ks[i], RATIONAL, RATIONAL,
                        obj_of_obj_obj_vs[i]);
@@ -169,14 +189,27 @@ void rational_init() {
   for (size_t i = 0; of_obj_file_ks[i] != NULL; i++) {
     put_of_obj_file(of_obj_file_ks[i], RATIONAL, of_obj_file_vs[i]);
   }
-  fn_obj_of_obj obj_of_obj_ks[] = {object_copy,        number_numerator,
-                                   number_denominator, number_floor,
-                                   number_ceiling,     number_truncate,
-                                   number_round,       number_sqrt,
-                                   number_inexact,     NULL};
+  fn_obj_of_obj obj_of_obj_ks[] = {object_copy,
+                                   number_denominator,
+                                   number_ceiling,
+                                   number_sqrt,
+                                   number_inexact,
+                                   number_even_p,
+                                   number_exact,
+                                   number_floor,
+                                   number_to_char,
+                                   number_negative_p,
+                                   number_numerator,
+                                   number_odd_p,
+                                   number_positive_p,
+                                   number_round,
+                                   number_square,
+                                   number_truncate,
+                                   NULL};
   fn_obj_of_obj obj_of_obj_vs[] = {
-      rational_copy, numerator,      denominator,   rational_floor, ceiling,
-      truncate,      rational_round, rational_sqrt, inexact,        NULL};
+      rational_copy, denominator,    ceiling, rational_sqrt, inexact,   even_p,
+      exact,         rational_floor, to_char, negative_p,    numerator, odd_p,
+      positive_p,    rational_round, square,  truncate,      NULL};
   for (size_t i = 0; obj_of_obj_ks[i] != NULL; i++) {
     put_obj_of_obj(obj_of_obj_ks[i], RATIONAL, obj_of_obj_vs[i]);
   }
@@ -185,4 +218,5 @@ void rational_init() {
   for (size_t i = 0; of_obj_ptr_ks[i] != NULL; i++) {
     put_of_obj_ptr(of_obj_ptr_ks[i], RATIONAL, of_obj_ptr_vs[i]);
   }
+  mpfr_init(opfr);
 }
