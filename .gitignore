@@ -39,3 +39,5 @@ src/ksi
 *.bak
 .DS_Store
 doc
+
+sample.c
