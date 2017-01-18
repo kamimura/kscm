@@ -27,7 +27,7 @@
         (list obj)
         (if (string? obj)
             (c-string->c obj)
-            (if (symbol? obj)
+            (if (c-symbol? obj)
                 (c-symbol->c obj)
                 (if (pair? obj)
                     (pair->c obj)
@@ -46,7 +46,7 @@
                       (obj->c obj)
                       '(|")|)))))
   (define (definition-value exp)
-    (if (symbol? (c-cadr exp))
+    (if (c-symbol? (c-cadr exp))
         (c-caddr exp)
         (c-make-lambda (c-cdadr exp)
                        (c-cddr exp))))
@@ -66,17 +66,14 @@
     (if (null? exp)
         '#f
         (list 'if (car exp) (car exp) (cons 'or (cdr exp)))))
-  (define log-port (open-output-file "compiler.log"))
   (define (compile exp target linkage)
-    (display exp log-port)
-    (newline log-port)
     (if (c-self-evaluating? exp)
         (compile-self-evaluating exp target linkage)
-        (if (symbol? exp)
+        (if (c-symbol? exp)
             (compile-variable exp target linkage)
             (if (pair? exp)
                 ((lambda (o)
-                   (if (symbol? o)
+                   (if (c-symbol? o)
                        (if (eq? o 'quote)
                            (compile-quoted exp target linkage)
                            (if (eq? o 'lambda)
@@ -105,9 +102,16 @@
                                                         (or->if (cdr exp))
                                                         target
                                                         linkage)
-                                                       (compile-application
-                                                        exp target linkage
-                                                        )))))))))
+                                                       (if (eq? o 'load)
+                                                           (compile
+                                                            (read
+                                                             (open-input-file
+                                                              (c-cadr exp)))
+                                                            target
+                                                            linkage)
+                                                           (compile-application
+                                                            exp target linkage
+                                                            ))))))))))
                        (compile-application exp target linkage)))
                  (car exp))
                 (error '|unknown expression type -- compile| exp)))))
@@ -417,10 +421,39 @@
                    (c-registers-modified seq2))
      (c-append (c-statements seq1) (c-statements seq2))))
 
-  (define input-file (open-input-file "input.scm"))
-  (define output-file (open-output-file "output.c"))
-  (define data (read input-file))
-  (define code (compile data 'val 'next))
-  (print-code code output-file)
-  'compiled
+  (define argv (command-line))
+  (if (c-= (length argv) 2)
+      (begin
+        (define target (c-cadr argv))
+        (define input-filename
+          (c-list->string
+           (c-append (c-string->list target 0 (c-string-length target))
+                     (c-string->list ".scm" 0 4))))
+        (define output-filename
+          (c-list->string
+           (c-append (c-string->list target 0 (string-length target))
+                     (c-string->list ".c" 0 2))))        
+        
+        (define input-file (open-input-file input-filename))
+        (define output-file (open-output-file output-filename))
+        (define data (read input-file))
+        (define code (compile data 'val 'next))
+        (print-code code output-file)
+        (define cc "cc ")
+        (define cflags "-g -Wall -Werror -O3 `pkg-config --cflags glib-2.0` -I./ ")
+        (define ldlibs "`pkg-config --libs glib-2.0` -L/opt/local/lib -lgmp -lmpfr -lmpc -lfl -L./ -lkscm ")
+        (define command
+          (c-list->string
+           (c-append
+            (c-string->list cc 0 (string-length cc))
+            (c-string->list cflags 0 (string-length cflags))
+            (c-string->list ldlibs 0 (string-length ldlibs))
+            (c-string->list output-filename 0 (string-length output-filename))
+            (c-string->list " -o " 0 4)
+            (c-string->list target 0 (string-length target)))))
+        (flush-output-port output-file)
+        (if (c-= (run-shell-command command) 0)
+            'compiled
+            'failed))
+      (error "usage: ksc <output>"))
   )

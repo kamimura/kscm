@@ -43,33 +43,10 @@ static void display(Object o, FILE *s) {
 }
 
 static Object apply_bool_of_ch(gboolean (*fn)(gunichar), Object args) {
-  return fn(carref(args).ch) ? boolean_true : boolean_false;
-}
-static Object alphabetic_p(Object args) {
-  return apply_bool_of_ch(g_unichar_isalpha, args);
-}
-static Object numeric_p(Object args) {
-  return apply_bool_of_ch(g_unichar_isalpha, args);
-}
-static Object whitespace_p(Object args) {
-  return apply_bool_of_ch(g_unichar_isspace, args);
+  return fn(carref(argl).ch) ? boolean_true : boolean_false;
 }
 static Object upper_case_p(Object args) {
   return apply_bool_of_ch(g_unichar_isupper, args);
-}
-static Object lower_case_p(Object args) {
-  return apply_bool_of_ch(g_unichar_islower, args);
-}
-static Object digit_value(Object args) {
-  gunichar ch = carref(args).ch;
-  gint n = g_unichar_digit_value(ch);
-  if (n == -1) {
-    return boolean_false;
-  }
-  Object o = {.type = RATIONAL};
-  mpq_init(o.rational);
-  mpq_set_ui(o.rational, n, 1);
-  return o;
 }
 static Object integer_to_char(Object args) {
   Object o = carref(args);
@@ -79,21 +56,6 @@ static Object integer_to_char(Object args) {
 static Object apply_char_of_char(gunichar (*fn)(gunichar), Object args) {
   gunichar ch = fn(carref(args).ch);
   return (Object){.type = CHAR, .ch = ch};
-}
-static Object upcase(Object args) {
-  return apply_char_of_char(g_unichar_toupper, args);
-}
-static Object downcase(Object args) {
-  return apply_char_of_char(g_unichar_tolower, args);
-}
-static Object foldcase(Object args) {
-  gunichar c = carref(args).ch;
-  char outbuf[6];
-  gint len = g_unichar_to_utf8(c, outbuf);
-  gchar *s = g_utf8_casefold(outbuf, len);
-  Object o = (Object){.type = CHAR, .ch = g_utf8_get_char(s)};
-  g_free(s);
-  return o;
 }
 static Object to_integer(Object args) {
   Object out = {.type = RATIONAL};
@@ -130,6 +92,81 @@ static Object write_char(Object args) {
   fprintf(port, "%s", outbuf);
   return undef;
 }
+static Object alphabetic_p(Object args) {
+  return apply_bool_of_ch(g_unichar_isalpha, args);
+}
+#include <string.h> // strcmp
+static gint casefold_cmp() {
+  gunichar c1 = carref(argl).ch;
+  gunichar c2 = carref(cdrref(argl)).ch;
+  char outbuf1[7];
+  char outbuf2[7];
+  gint len1 = g_unichar_to_utf8(c1, outbuf1);
+  gint len2 = g_unichar_to_utf8(c2, outbuf2);
+  outbuf1[len1] = '\0';
+  outbuf2[len2] = '\0';
+  gchar *s1 = g_utf8_casefold(outbuf1, len1);
+  gchar *s2 = g_utf8_casefold(outbuf2, len2);
+  gint n = strcmp(s1, s2);
+  g_free(s1);
+  g_free(s2);
+  return n;
+}
+static Object ci_le_p(Object args) {
+  gint n = casefold_cmp();
+  return n <= 0 ? boolean_true : boolean_false;
+}
+static Object ci_lt_p(Object args) {
+  gint n = casefold_cmp();
+  return n < 0 ? boolean_true : boolean_false;
+}
+static Object ci_eq_p(Object args) {
+  gint n = casefold_cmp();
+  return n == 0 ? boolean_true : boolean_false;
+}
+static Object ci_ge_p(Object args) {
+  gint n = casefold_cmp();
+  return n >= 0 ? boolean_true : boolean_false;
+}
+static Object ci_gt_p(Object args) {
+  gint n = casefold_cmp();
+  return n > 0 ? boolean_true : boolean_false;
+}
+static Object downcase(Object args) {
+  return apply_char_of_char(g_unichar_tolower, args);
+}
+static Object foldcase(Object args) {
+  gunichar c = carref(argl).ch;
+  char outbuf[7];
+  gint len = g_unichar_to_utf8(c, outbuf);
+  gchar *s = g_utf8_casefold(outbuf, len);
+  Object o = (Object){.type = CHAR, .ch = g_utf8_get_char(s)};
+  g_free(s);
+  return o;
+}
+static Object lower_case_p(Object args) {
+  return apply_bool_of_ch(g_unichar_islower, args);
+}
+static Object numeric_p(Object args) {
+  return apply_bool_of_ch(g_unichar_isalpha, args);
+}
+static Object upcase(Object args) {
+  return apply_char_of_char(g_unichar_toupper, args);
+}
+static Object whitespace_p(Object args) {
+  return apply_bool_of_ch(g_unichar_isspace, args);
+}
+static Object digit_value(Object args) {
+  gunichar ch = carref(argl).ch;
+  gint n = g_unichar_digit_value(ch);
+  if (n == -1) {
+    return boolean_false;
+  }
+  Object o = {.type = RATIONAL};
+  mpq_init(o.rational);
+  mpq_set_ui(o.rational, n, 1);
+  return o;
+}
 #include "env.h"
 #include "symbol.h"
 void char_init() {
@@ -144,18 +181,9 @@ void char_init() {
     put_of_obj_file(of_obj_file_ks[i], CHAR, of_obj_file_vs[i]);
   }
 
-  /* add env */
   char const *names[] = {"char-alphabetic?",
-                         "char-numeric?",
-                         "char-whitespace?",
-                         "char-upper-case?",
-                         "char-lower-case?",
-                         "digit-value",
                          "char->integer",
                          "integer->char",
-                         "char-upcase",
-                         "char-downcase",
-                         "char-foldcase",
                          "c-char->integer",
                          "c-char<=?",
                          "c-char<?",
@@ -163,13 +191,29 @@ void char_init() {
                          "c-char>=?",
                          "c-char>?",
                          "c-write-char",
+                         "c-char-alphabetic?",
+                         "c-char-ci<=?",
+                         "c-char-ci<?",
+                         "c-char-ci=?",
+                         "c-char-ci>=?",
+                         "c-char-ci>?",
+                         "c-char-downcase",
+                         "c-char-foldcase",
+                         "c-char-lower-case?",
+                         "c-char-numeric?",
+                         "c-char-upcase",
+                         "c-char-upper-case?",
+                         "c-char-whitespace?",
+                         "c-digit-value",
                          NULL};
   fn_obj_of_obj procs[] = {
-      alphabetic_p, numeric_p,   whitespace_p, upper_case_p,
-      lower_case_p, digit_value, to_integer,   integer_to_char,
-      upcase,       downcase,    foldcase,     to_integer,
-      le_p,         lt_p,        math_equal_p, ge_p,
-      gt_p,         write_char,  NULL};
+      alphabetic_p, to_integer,   integer_to_char, to_integer,
+      le_p,         lt_p,         math_equal_p,    ge_p,
+      gt_p,         write_char,   alphabetic_p,    ci_le_p,
+      ci_lt_p,      ci_eq_p,      ci_ge_p,         ci_gt_p,
+      downcase,     foldcase,     lower_case_p,    numeric_p,
+      upcase,       upper_case_p, whitespace_p,    digit_value,
+      NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));
