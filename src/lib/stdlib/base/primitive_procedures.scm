@@ -525,7 +525,8 @@
 
   (define (exact . args)
     (if (c-= (c-length args) 1)
-        (if (c-number? (c-car args))
+        (if (and (c-real? (c-car args))
+                 (c-finite? (c-car args)))
             (c-exact (c-car args))
             (error '|(exact) wrong type of argument --| args))
         (error '|(exact) wrong number of arguments --| args)))

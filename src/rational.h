@@ -5,6 +5,3 @@
 Object rational_new(char const *s, int base);
 
 void rational_init();
-
-/* Object rational_new(char const *s, int base); */
-/* void rational_init(); */

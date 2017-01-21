@@ -7,23 +7,22 @@ Object none = {.type = NONE};
 
 static GHashTable *tb_bool_of_obj = NULL;
 void put_bool_of_obj(fn_obj_of_obj k1, Type k2, fn_bool_of_obj v) {
-  if (tb_bool_of_obj == NULL) {
+  if (!tb_bool_of_obj) {
     tb_bool_of_obj = g_hash_table_new(NULL, NULL);
   }
   GHashTable *t = g_hash_table_lookup(tb_bool_of_obj, k1);
-  if (t == NULL) {
+  if (!t) {
     t = g_hash_table_new(NULL, NULL);
     g_hash_table_insert(tb_bool_of_obj, k1, t);
-    /* g_hash_table_insert(tb_bool_of_obj, GINT_TO_POINTER(k2), t); */
   }
   g_hash_table_insert(t, GINT_TO_POINTER(k2), v);
 }
 fn_bool_of_obj get_bool_of_obj(fn_obj_of_obj k1, Object k2) {
-  if (tb_bool_of_obj == NULL) {
+  if (!tb_bool_of_obj) {
     return NULL;
   }
   GHashTable *t = g_hash_table_lookup(tb_bool_of_obj, k1);
-  if (t == NULL) {
+  if (!t) {
     return NULL;
   }
   return g_hash_table_lookup(t, GINT_TO_POINTER(k2.type));
@@ -39,7 +38,6 @@ void put_bool_of_obj_obj(fn_obj_of_obj k1, Type k2, Type k3,
   if (t1 == NULL) {
     t1 = g_hash_table_new(NULL, NULL);
     g_hash_table_insert(tb_bool_of_obj_obj, k1, t1);
-    /* g_hash_table_insert(tb_bool_of_obj_obj, GINT_TO_POINTER(k1), t1); */
   }
   GHashTable *t2 = g_hash_table_lookup(t1, GINT_TO_POINTER(k2));
   if (t2 == NULL) {
@@ -71,8 +69,7 @@ void put_obj_of_obj_obj(fn_obj_of_obj k1, Type k2, Type k3,
   GHashTable *t1 = g_hash_table_lookup(tb_obj_of_obj_obj, k1);
   if (t1 == NULL) {
     t1 = g_hash_table_new(NULL, NULL);
-    g_hash_table_insert(tb_obj_of_obj_obj, k1, t1);
-    /* g_hash_table_insert(tb_obj_of_obj_obj, GINT_TO_POINTER(k1), t1); */
+    g_hash_table_insert(tb_obj_of_obj_obj, GINT_TO_POINTER(k1), t1);
   }
   GHashTable *t2 = g_hash_table_lookup(t1, GINT_TO_POINTER(k2));
   if (t2 == NULL) {
@@ -124,12 +121,10 @@ void put_obj_of_obj(fn_obj_of_obj k1, Type k2, fn_obj_of_obj v) {
   if (tb_obj_of_obj == NULL) {
     tb_obj_of_obj = g_hash_table_new(NULL, NULL);
   }
-  GHashTable *t = g_hash_table_lookup(tb_obj_of_obj, k1);
-  /* GHashTable *t = g_hash_table_lookup(tb_obj_of_obj, GINT_TO_POINTER(k1)); */
+  GHashTable *t = g_hash_table_lookup(tb_obj_of_obj, GINT_TO_POINTER(k1));
   if (t == NULL) {
     t = g_hash_table_new(NULL, NULL);
-    g_hash_table_insert(tb_obj_of_obj, k1, t);
-    /* g_hash_table_insert(tb_obj_of_obj, GINT_TO_POINTER(k1), t); */
+    g_hash_table_insert(tb_obj_of_obj, GINT_TO_POINTER(k1), t);
   }
   g_hash_table_insert(t, GINT_TO_POINTER(k2), v);
 }
@@ -407,7 +402,8 @@ static Object port_p(Object args) {
 static Object real_p(Object args) {
   Type t = carref(argl).type;
   if (t == COMPLEX) {
-    return cimag(carref(argl).z) == 0 ? boolean_true : boolean_false;
+    return mpfr_zero_p(mpc_imagref(carref(argl).z)) ? boolean_true
+                                                    : boolean_false;
   }
   if (t == RATIONAL) {
     return boolean_true;

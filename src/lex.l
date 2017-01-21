@@ -212,11 +212,11 @@ Object c_str_to_datum(char const *s) {
 Object number_to_string(Object args) {
     Object o1 = carref(argl);
     char *s = NULL;
-    if (o1.type == COMPLEX) {        
-        asprintf(&s, "%lf%f+lfi", creal(o1.z), cimag(o1.z));
-        yy_scan_string(s);    
-        yyparse();
-        free(s);
+    if (o1.type == COMPLEX) {
+        /* asprintf(&s, "%s+%si", creal(o1.z), cimag(o1.z)); */
+        /* yy_scan_string(s);     */
+        /* yyparse(); */
+        /* free(s); */
     } else if (o1.type == RATIONAL) {
         if (mpz_cmp_ui(mpq_denref(o1.rational), 1) == 0) {
             gmp_asprintf(&s, "\"%Zd\"", mpq_numref(o1.rational));

@@ -1,9 +1,12 @@
 #include "number.h"
 
+/* mpfr_prec_t prec = 53; */
+mpfr_prec_t prec = 128;
+
 static Object apply_bool_of_obj(fn_obj_of_obj fn, Object args) {
   Object o = carref(args);
   fn_bool_of_obj fn0 = get_bool_of_obj(fn, o);
-  if (fn0 == NULL) {
+  if (!fn0) {
     fprintf(stderr, "%s: %s type: %d %p\n", __FILE__, __FUNCTION__, o.type, fn);
     object_write_stdout(args);
     puts("");
@@ -120,6 +123,26 @@ Object number_square(Object args) {
 Object number_truncate(Object args) {
   return apply_obj_of_obj(number_truncate, args);
 }
+/* complex library */
+Object number_angle(Object args) {
+  return apply_obj_of_obj(number_angle, args);
+}
+Object number_imag_part(Object args) {
+  return apply_obj_of_obj(number_imag_part, args);
+}
+Object number_magnitude(Object args) {
+  return apply_obj_of_obj(number_magnitude, args);
+}
+Object number_make_polar(Object args) {
+  return apply_obj_of_obj_obj(number_make_polar, args);
+}
+Object number_make_rectangular(Object args) {
+  return apply_obj_of_obj_obj(number_make_rectangular, args);
+}
+Object number_real_part(Object args) {
+  return apply_obj_of_obj(number_real_part, args);
+}
+
 #include "env.h"
 #include "symbol.h" // symbol_new
 void number_init() {
@@ -155,19 +178,52 @@ void number_init() {
                          "c-round",
                          "c-square",
                          "c-truncate",
+                         "c-angle",
+                         "c-imag-part",
+                         "c-magnitude",
+                         "c-make-polar",
+                         "c-make-rectangular",
+                         "c-real-part",
                          NULL};
-  fn_obj_of_obj procs[] = {
-      number_add,        number_sub,        number_lt,
-      number_to_string,  number_math_equal, number_math_equal,
-      number_add,        number_mul,        number_sub,
-      number_lt,         number_div,        number_inexact,
-      number_exact_p,    number_ceiling,    number_denominator,
-      number_even_p,     number_exact,      number_exact_p,
-      number_expt,       number_floor,      number_gcd,
-      number_inexact,    number_to_char,    number_lcm,
-      number_negative_p, number_to_string,  number_numerator,
-      number_odd_p,      number_positive_p, number_round,
-      number_square,     number_truncate,   NULL};
+  fn_obj_of_obj procs[] = {number_add,
+                           number_sub,
+                           number_lt,
+                           number_to_string,
+                           number_math_equal,
+                           number_math_equal,
+                           number_add,
+                           number_mul,
+                           number_sub,
+                           number_lt,
+                           number_div,
+                           number_inexact,
+                           number_exact_p,
+                           number_ceiling,
+                           number_denominator,
+                           number_even_p,
+                           number_exact,
+                           number_exact_p,
+                           number_expt,
+                           number_floor,
+                           number_gcd,
+                           number_inexact,
+                           number_to_char,
+                           number_lcm,
+                           number_negative_p,
+                           number_to_string,
+                           number_numerator,
+                           number_odd_p,
+                           number_positive_p,
+                           number_round,
+                           number_square,
+                           number_truncate,
+                           number_angle,
+                           number_imag_part,
+                           number_magnitude,
+                           number_make_polar,
+                           number_make_rectangular,
+                           number_real_part,
+                           NULL};
   for (size_t i = 0; names[i] != NULL; i++) {
     val = (Object){.type = PROC, .proc = procs[i]};
     def_var_val(symbol_new(names[i]));

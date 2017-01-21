@@ -121,13 +121,7 @@
   
   (define (apply procedure arguments)
     (if (primitive-procedure? procedure)
-        (if (c-eq? (primitive-implementation procedure) 'apply)
-            (if (c-= (c-length arguments) 2)
-                (if (c-list? (c-cadr arguments))
-                    (apply (c-car arguments) (c-cadr arguments))
-                    (error '|(apply) wrong type of argument --| arguments))
-                (error '|(apply) wrong number of arguments --| arguments))
-            (c-apply (primitive-implementation procedure) arguments))
+        (c-apply (primitive-implementation procedure) arguments)
         (if (compound-procedure? procedure)
             (begin
               (define env  (extend-environment
@@ -290,9 +284,10 @@
             #f)))
 
   (define (primitive-procedure? proc) (tagged-list? proc 'primitive))
-  (define (primitive-implementation proc) (cdr proc))
+  (define (primitive-implementation proc) (car (cdr proc)))
   (load "./lib/stdlib/base/primitive_procedures.scm")
   (load "./lib/stdlib/char/primitive_procedures.scm")
+  (load "./lib/stdlib/complex/primitive_procedures.scm")
   (define primitive-procedures
     (list (c-cons '* *)
           (c-cons '+ +)
@@ -305,7 +300,6 @@
           (c-cons '>= >=)
           (c-cons 'abs abs)
           (c-cons 'append append)
-          (c-cons 'apply 'apply)
           (c-cons 'binary-port? binary-port?)
           (c-cons 'boolean=? boolean=?)
           (c-cons 'boolean? boolean?)          
@@ -464,6 +458,14 @@
           (c-cons 'char-upper-case? char-upper-case?)
           (c-cons 'char-whitespace? char-whitespace?)
           (c-cons 'digit-value digit-value)
+
+          ;; complex
+          (c-cons 'angle angle)
+          (c-cons 'imag-part imag-part)
+          (c-cons 'magnitude magnitude)
+          (c-cons 'make-polar make-polar)
+          (c-cons 'make-rectangular make-rectangular)
+          (c-cons 'real-part real-part)
           ))
   (define (map proc list)
     (if (c-null? list)
@@ -473,11 +475,11 @@
   (define (primitive-procedure-names) (map car primitive-procedures))
   (define (primitive-procedure-objects)
     (map (lambda (proc)
-           (cons 'primitive (cdr proc)))
+           (list 'primitive (cdr proc)))
          primitive-procedures))
 
   (define (setup-environment)
-    ((lambda (initial-env)
+    ((lambda (initial-env)        
        (define-variable! 'quote quote initial-env)
        (define-variable! 'lambda lambda initial-env)
        (define-variable! 'define define initial-env)

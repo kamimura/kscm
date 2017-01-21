@@ -41,3 +41,4 @@ src/ksi
 doc
 
 sample.c
+ksi.c

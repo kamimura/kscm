@@ -8,7 +8,6 @@ typedef struct Object Object;
 typedef enum Type Type;
 typedef Object (*fn_obj_of_obj)(Object);
 
-#include <complex.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -16,6 +15,7 @@ typedef Object (*fn_obj_of_obj)(Object);
 
 #include <glib.h>
 #include <gmp.h>
+#include <mpc.h>
 #include <mpfr.h>
 
 enum Type {
@@ -59,7 +59,8 @@ enum Type {
 struct Object {
   Type type;
   union {
-    double complex z;
+    mpc_t z;
+    /* double complex z; */
     mpq_t rational;
     bool boolean;
     size_t index;

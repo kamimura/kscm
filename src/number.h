@@ -5,6 +5,8 @@ extern fn_obj_of_obj bool_of_obj_ks[];
 extern fn_obj_of_obj obj_of_obj_obj_ks[];
 extern fn_obj_of_obj obj_of_obj_ks[];
 
+extern mpfr_prec_t prec;
+
 Object number_exact_p(Object args);
 Object number_finite_p(Object args);
 Object number_infinite_p(Object args);
@@ -38,4 +40,13 @@ Object number_square(Object args);
 Object number_truncate(Object args);
 
 extern Object number_to_string(Object args);
+
+/* complex library */
+Object number_angle(Object args);
+Object number_imag_part(Object args);
+Object number_magnitude(Object args);
+Object number_make_polar(Object args);
+Object number_make_rectangular(Object args);
+Object number_real_part(Object args);
+
 void number_init();
