@@ -539,7 +539,9 @@
 
   (eval '(begin
            (load "./lib/stdlib/base/compound_procedures.scm")
-           (load "./lib/stdlib/char/compound_procedures.scm"))
+           (load "./lib/stdlib/char/compound_procedures.scm")
+           (load "./lib/stdlib/cxr/compound_procedures.scm")
+           )
         the-global-environment)
            
   (driver-loop)
