@@ -41,7 +41,6 @@
              (iter (cdr objs))))))
     (if (not (string=? message ""))
         (begin
-          (display message (current-error-port))
           (display message (current-error-port))))
     (iter objs)
     (display "\n" (current-error-port))
@@ -139,7 +138,7 @@
                         "cnewuc(" (number->string (char->integer obj)) ")"))
           ((eq? obj undef) "undef_ptr")
           ((boolean? obj) (if obj "true_ptr" "false_ptr"))
-          (#t error "const" obj)))
+          (#t (error "const" obj))))
   
   (define (caddr p) (car (cdr (cdr p))))
   (define (print-code code port)
@@ -626,7 +625,7 @@
          (define n (system (string-append "cc -O3 `pkg-config --cflags glib-2.0` -I/opt/local/include `pkg-config --libs glib-2.0` -L/opt/local/lib -L./ -lgmp -lmpfr -lmpc -lfl -lgc -lkscm " output-filename " -o " name)))
          (if (= n 0)
              'compiled
-             (error "can't compiled:" n))
+             (error "error:" n))
          ))
       (error "usage: ksc name"))
   ))
