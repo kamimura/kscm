@@ -27,9 +27,10 @@
 *.i*86
 *.x86_64
 *.hex
-sample
 
-
+src/sample
+src/ksc
+src/ksi
 
 # Debug files
 *.dSYM/
