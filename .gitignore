@@ -27,7 +27,20 @@
 *.i*86
 *.x86_64
 *.hex
+sample
+
+
 
 # Debug files
 *.dSYM/
 *.su
+
+#
+.DS_Store
+*~
+temp*
+ksc.c
+ksi.c
+runksc
+runksc.c
+doc

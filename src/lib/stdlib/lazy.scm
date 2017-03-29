@@ -1,0 +1,3 @@
+(begin
+  'lazy-library
+  )
