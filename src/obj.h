@@ -18,6 +18,8 @@ typedef struct Proc Proc;
 typedef Proc *ProcPtr;
 typedef struct Port Port;
 typedef Port *PortPtr;
+typedef struct Vect Vect;
+typedef Vect* VectPtr;
 typedef ObjPtr (*fn_type)(ObjPtr);
 
 enum Type {
@@ -31,6 +33,10 @@ enum Type {
   OPORT,
   IPORT_CLOSED,
   OPORT_CLOSED,
+  IBPORT,
+  OBPORT,
+  IBPORT_CLOSED,
+  OBPORT_CLOSED,
   UNDEF,
   BOOLEAN_TRUE,
   BOOLEAN_FALSE,
@@ -45,6 +51,7 @@ enum Type {
   ERR,
   RERR,
   FERR,
+  VEC,
 };
 struct Obj {
   Type t;
@@ -57,6 +64,7 @@ struct Obj {
     ProcPtr proc;
     gunichar uc;
     Ptr ptr;
+    VectPtr v;
   };
 };
 struct Pair {
@@ -70,6 +78,10 @@ struct Proc {
 struct Port {
   char *name;
   FILE *fh;
+};
+struct Vect {
+  size_t len;
+  ObjPtr *v;
 };
 extern ObjPtr empty_ptr;
 
@@ -101,7 +113,7 @@ ObjPtr znew_fr(char *s);
 ObjPtr znew_q(char *s);
 ObjPtr znew_s_s(char *s1, char *s);
 ObjPtr cnewuc(gunichar uc);
-
+ObjPtr clist_to_vector(ObjPtr p);
 bool err_p(ObjPtr p);
 void ewrite(ObjPtr p);
 

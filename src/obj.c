@@ -63,7 +63,12 @@ ObjPtr scm_eqv_p(ObjPtr argl) {
   case OPORT:
   case IPORT_CLOSED:
   case OPORT_CLOSED:
+  case IBPORT:
+  case OBPORT:
+  case IBPORT_CLOSED:
+  case OBPORT_CLOSED:
   case OEOF:
+  case VEC:
     return p1 == p2 ? true_ptr : false_ptr;
   case COMPLEX: {
     if (t2 == COMPLEX) {
@@ -104,7 +109,6 @@ ObjPtr scm_eq_p(ObjPtr argl) {
   if (err_p(argl->p->r->p->l)) {
     return argl->p->r->p->l;
   }
-
   return argl->p->l == argl->p->r->p->l ? true_ptr : false_ptr;
 }
 static ObjPtr onew(Type t) {
@@ -574,7 +578,7 @@ ObjPtr qnew(char *s) {
   mpq_canonicalize(p->q);
   return p;
 }
-static mpfr_prec_t prec = 128;
+static mpfr_prec_t prec = 53;
 static mpq_t opq1;
 static mpf_t opf1;
 static mpfr_t opfr1;
@@ -698,8 +702,8 @@ ObjPtr scm_numerator(ObjPtr argl) {
   case RATIONAL: {
     ObjPtr out = onew(RATIONAL);
     mpq_init(out->q);
-    mpz_set(mpq_numref(out->q), mpq_denref(p->q));
-    mpz_set_ui(mpq_numref(out->q), 1);
+    mpz_set(mpq_numref(out->q), mpq_numref(p->q));
+    mpz_set_ui(mpq_denref(out->q), 1);
     return out;
   }
   default:
@@ -825,8 +829,14 @@ ObjPtr scm_angle(ObjPtr argl) {
     mpfr_set_ui(mpc_imagref(out->z), 0, MPFR_RNDN);
     return out;
   }
-  case RATIONAL:
-    return qnew("0");
+  case RATIONAL: {
+    ObjPtr out = onew(COMPLEX);
+    mpc_init2(out->z, prec);
+    mpc_set_q_q(opc1, p->q, qzero, MPC_RNDNN);
+    mpc_arg(mpc_realref(out->z), opc1, MPC_RNDNN);
+    mpfr_set_ui(mpc_imagref(out->z), 0, MPFR_RNDN);
+    return out;
+  }
   default:
     return domain_err("angle", argl);
   }
@@ -1503,7 +1513,6 @@ ObjPtr scm_char_whitespace_p(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   if (p->t == CHAR) {
     return g_unichar_isspace(p->uc) ? true_ptr : false_ptr;
   }
@@ -1517,7 +1526,6 @@ ObjPtr scm_digit_value(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   if (p->t == CHAR) {
     gint n = g_unichar_digit_value(p->uc);
     if (n == -1) {
@@ -1538,10 +1546,137 @@ ObjPtr scm_boolean_p(ObjPtr argl) {
   if (err_p(argl->p->l)) {
     return argl->p->l;
   }
-
   Type t = argl->p->l->t;
   return t == BOOLEAN_TRUE || t == BOOLEAN_FALSE ? true_ptr : false_ptr;
 }
+/* vector */
+ObjPtr vecnew(ObjPtr l, size_t len) {
+  ObjPtr o = onew(VEC);
+  o->v = GC_MALLOC(sizeof(Vect));
+  o->v->len = len;
+  ObjPtr p = l;
+  ObjPtr *v = GC_MALLOC(sizeof(ObjPtr) * len);
+  for (size_t i = 0; i < len; i++) {
+    v[i] = p->p->l;
+    p = p->p->r;
+  }
+  o->v->v = v;
+  return o;
+}
+ObjPtr clist_to_vector(ObjPtr p) { return vecnew(p, clength(p)); }
+ObjPtr scm_vector_p(ObjPtr argl) {
+  if (clength(argl) != 1) {
+    return num_err("vector?", argl);
+  }
+  ObjPtr p = argl->p->l;
+  if (err_p(p)) {
+    return p;
+  }
+  return p->t == VEC ? true_ptr : false_ptr;
+}
+ObjPtr scm_vector_length(ObjPtr argl) {
+  if (clength(argl) != 1) {
+    return num_err("vector-length", argl);
+  }
+  ObjPtr p = argl->p->l;
+  if (err_p(p)) {
+    return p;
+  }
+  if (p->t == VEC) {
+    ObjPtr out = onew(RATIONAL);
+    mpq_init(out->q);
+    mpq_set_ui(out->q, p->v->len, 1);
+    return out;
+  }
+  return domain_err("vector-length", argl);
+}
+ObjPtr scm_list_to_vector(ObjPtr argl) {
+  if (clength(argl) != 1) {
+    return num_err("list->vector", argl);
+  }
+  ObjPtr p = argl->p->l;
+  if (err_p(p)) {
+    return p;
+  }
+  if (clist_p(p)) {
+    return clist_to_vector(p);
+  }
+  return domain_err("list->vector", argl);
+}
+ObjPtr scm_vector_ref(ObjPtr argl) {
+  if (clength(argl) != 2) {
+    return num_err("vector-ref", argl);
+  }
+  ObjPtr p1 = argl->p->l;
+  ObjPtr p2 = argl->p->r->p->l;
+  if (err_p(p1)) {
+    return p1;
+  }
+  if (err_p(p2)) {
+    return p2;
+  }
+  if (p1->t == VEC && p2->t == RATIONAL &&
+      mpz_cmp_ui(mpq_denref(p2->q), 1) == 0 &&
+      mpz_cmp_ui(mpq_numref(p2->q), 0) >= 0) {
+    size_t i = mpz_get_ui(mpq_numref(p2->q));
+    if (i < p1->v->len) {
+      return p1->v->v[i];
+    }
+  }
+  return domain_err("vector-ref", argl);
+}
+ObjPtr scm_vector_set(ObjPtr argl) {
+  if (clength(argl) != 3) {
+    return num_err("vector-set!", argl);
+  }
+  ObjPtr p1 = argl->p->l;
+  ObjPtr p2 = argl->p->r->p->l;
+  ObjPtr p3 = argl->p->r->p->r->p->l;
+  if (err_p(p1)) {
+    return p1;
+  }
+  if (err_p(p2)) {
+    return p2;
+  }
+  if (err_p(p3)) {
+    return p3;
+  }
+  if (p1->t == VEC && p2->t == RATIONAL &&
+      mpz_cmp_ui(mpq_denref(p2->q), 1) == 0 &&
+      mpz_cmp_ui(mpq_numref(p2->q), 0) >= 0) {
+    size_t i = mpz_get_ui(mpq_numref(p2->q));
+    if (i < p1->v->len) {
+      return p1->v->v[i] = p3;
+    }
+  }
+  return domain_err("vector-set!", argl);
+}
+
+ObjPtr scm_vector_to_list(ObjPtr argl) {
+  size_t len = clength(argl);
+  if (len == 1) {
+    ObjPtr p = argl->p->l;
+    if (err_p(p)) {
+      return p;
+    }
+    if (p->t != VEC) {
+      return domain_err("vector->list", argl);
+    }
+    size_t len = p->v->len;
+    ObjPtr *v = p->v->v;
+    ObjPtr out = empty_ptr;
+    for (size_t i = len; i > 0; i--) {
+      out = pnew(v[i - 1], out);
+    }
+    return out;
+  }
+  if (len == 2) {
+  }
+  if (len == 3) {
+  }
+  return num_err("vector->list", argl);
+}
+/* vector end */
 /* procedure */
 ObjPtr procnew(char *name, fn_type fn) {
   ObjPtr p = onew(PROC);
@@ -1558,13 +1693,16 @@ ObjPtr scm_procedure_p(ObjPtr argl) {
   if (err_p(argl->p->l)) {
     return argl->p->l;
   }
-
   Type t = argl->p->l->t;
   return t == PROC || t == CPROC || t == PROC_APPLY ? true_ptr : false_ptr;
 }
 /* exceptions */
 ObjPtr enew(ObjPtr m, ObjPtr o) {
   ObjPtr p = cpnew(ERR, m, o);
+  return p;
+}
+ObjPtr fenew(ObjPtr m, ObjPtr o) {
+  ObjPtr p = cpnew(FERR, m, o);
   return p;
 }
 void ewrite(ObjPtr p) {
@@ -1765,19 +1903,35 @@ void cwrite(ObjPtr p, ObjPtr port) {
     break;
   }
   case IPORT: {
-    fprintf(port->port->fh, "#<input-port %s>", port->port->name);
+    fprintf(port->port->fh, "#<input-port %s>", p->port->name);
     break;
   }
   case OPORT: {
-    fprintf(port->port->fh, "#<output-port %s>", port->port->name);
+    fprintf(port->port->fh, "#<output-port %s>", p->port->name);
     break;
   }
   case IPORT_CLOSED: {
-    fprintf(port->port->fh, "#<input-port(closed) %s>", port->port->name);
+    fprintf(port->port->fh, "#<input-port(closed) %s>", p->port->name);
     break;
   }
   case OPORT_CLOSED: {
-    fprintf(port->port->fh, "#<output-port(closed) %s>", port->port->name);
+    fprintf(port->port->fh, "#<output-port(closed) %s>", p->port->name);
+    break;
+  }
+  case IBPORT: {
+    fprintf(port->port->fh, "#<binary-input-port %s>", p->port->name);
+    break;
+  }
+  case OBPORT: {
+    fprintf(port->port->fh, "#<binary-output-port %s>", p->port->name);
+    break;
+  }
+  case IBPORT_CLOSED: {
+    fprintf(port->port->fh, "#<binary-input-port(closed) %s>", p->port->name);
+    break;
+  }
+  case OBPORT_CLOSED: {
+    fprintf(port->port->fh, "#<binary-output-port(closed) %s>", p->port->name);
     break;
   }
   case UNDEF:
@@ -1817,6 +1971,20 @@ void cwrite(ObjPtr p, ObjPtr port) {
     cwrite(p->p->r, port);
     fprintf(port->port->fh, ">");
     break;
+  case VEC: {
+    size_t len = p->v->len;
+    ObjPtr *v = p->v->v;
+    fprintf(port->port->fh, "#(");
+    if (len != 0) {
+      cdisplay(v[0], port);
+      for (size_t i = 1; i < len; i++) {
+        fprintf(port->port->fh, " ");
+        cwrite(v[i], port);
+      }
+    }
+    fprintf(port->port->fh, ")");
+    break;
+  }
   }
 }
 void cdisplay(ObjPtr p, ObjPtr port) {
@@ -1831,6 +1999,10 @@ void cdisplay(ObjPtr p, ObjPtr port) {
   case OPORT:
   case IPORT_CLOSED:
   case OPORT_CLOSED:
+  case IBPORT:
+  case OBPORT:
+  case IBPORT_CLOSED:
+  case OBPORT_CLOSED:
   case UNDEF:
   case BOOLEAN_TRUE:
   case BOOLEAN_FALSE:
@@ -1878,6 +2050,20 @@ void cdisplay(ObjPtr p, ObjPtr port) {
   case SYMV:
     fprintf(port->port->fh, "%s", p->s);
     break;
+  case VEC: {
+    size_t len = p->v->len;
+    ObjPtr *v = p->v->v;
+    fprintf(port->port->fh, "#(");
+    if (len != 0) {
+      cdisplay(v[0], port);
+      for (size_t i = 1; i < len; i++) {
+        fprintf(port->port->fh, " ");
+        cdisplay(v[i], port);
+      }
+    }
+    fprintf(port->port->fh, ")");
+    break;
+  }
   }
 }
 static ObjPtr primitive_procedures = NULL;
@@ -1960,6 +2146,21 @@ ObjPtr scm_textual_port_p(ObjPtr argl) {
     return false_ptr;
   }
 }
+ObjPtr scm_binary_port_p(ObjPtr argl) {
+  if (clength(argl) != 1) {
+    return num_err("binary-port?", argl);
+  }
+  switch (argl->p->l->t) {
+  case IBPORT:
+  case OBPORT:
+  case IBPORT_CLOSED:
+  case OBPORT_CLOSED:
+    return true_ptr;
+  default:
+    return false_ptr;
+  }
+}
+
 ObjPtr scm_write(ObjPtr argl) {
   ObjPtr p = NULL;
   ObjPtr port = NULL;
@@ -1967,7 +2168,7 @@ ObjPtr scm_write(ObjPtr argl) {
     p = argl->p->l;
     /* if (err_p(p)) { */
     /*   return p; */
-    /* }     */
+    /* } */
     port = cur_oport;
   } else if (clength(argl) == 2) {
     p = argl->p->l;
@@ -2022,16 +2223,89 @@ ObjPtr scm_read_char(ObjPtr argl) {
       return p;
     }
     if (p->t == IPORT) {
-      gunichar c = getuc(cur_iport->port->fh);
-      return c == EOF ? eof_ptr : cnewuc(c);
+      gunichar c = getuc(p->port->fh);
+      return cnewuc(c);
     }
     return domain_err("read-char", argl);
   }
   return num_err("read-char", argl);
 }
+ObjPtr scm_peek_char(ObjPtr argl) {
+  size_t len = clength(argl);
+  if (len == 0) {
+    gunichar c = getuc(cur_iport->port->fh);
+    if (c == EOF) {
+      return eof_ptr;
+    }
+    char outbuf[6];
+    gint len = g_unichar_to_utf8(c, outbuf);
+    for (size_t i = len; i > 0; i--) {
+      ungetc(outbuf[i - 1], cur_iport->port->fh);
+    }
+    return cnewuc(c);
+  }
+  if (len == 1) {
+    ObjPtr p = argl->p->l;
+    if (err_p(p)) {
+      return p;
+    }
+    if (p->t == IPORT) {
+      gunichar c = getuc(p->port->fh);
+      if (c == EOF) {
+        return eof_ptr;
+      }
+      char outbuf[6];
+      gint len = g_unichar_to_utf8(c, outbuf);
+      for (gint i = len; i > 0; i--) {
+        ungetc(outbuf[i - 1], p->port->fh);
+      }
+      return cnewuc(c);
+    }
+    return domain_err("peek-char", argl);
+  }
+  return num_err("peek-char", argl);
+}
 
 #include <errno.h>
 #include <string.h>
+ObjPtr scm_open_binary_input_file(ObjPtr argl) {
+  size_t len = clength(argl);
+  if (len != 1) {
+    return num_err("open-binary-input-file", argl);
+  }
+  ObjPtr p = argl->p->l;
+  if (err_p(p)) {
+    return p;
+  }
+  if (p->t != STR && p->t != STREMPTY) {
+    return domain_err("open-binary-input-file", argl);
+  }
+  char *filename = cscmstr_to_utf8(p);
+  FILE *fh = fopen(filename, "rb");
+  if (fh == NULL) {
+    return fenew(utf8_to_scmstr(strerror(errno)), p);
+  }
+  return portnew(IBPORT, filename, fh);
+}
+ObjPtr scm_open_binary_output_file(ObjPtr argl) {
+  size_t len = clength(argl);
+  if (len != 1) {
+    return num_err("open-binary-input-file", argl);
+  }
+  ObjPtr p = argl->p->l;
+  if (err_p(p)) {
+    return p;
+  }
+  if (p->t != STR && p->t != STREMPTY) {
+    return domain_err("open-binary-input-file", argl);
+  }
+  char *filename = cscmstr_to_utf8(p);
+  FILE *fh = fopen(filename, "wb");
+  if (fh == NULL) {
+    return fenew(utf8_to_scmstr(strerror(errno)), p);
+  }
+  return portnew(OBPORT, filename, fh);
+}
 ObjPtr scm_open_input_file(ObjPtr argl) {
   size_t len = clength(argl);
   if (len != 1) {
@@ -2047,11 +2321,9 @@ ObjPtr scm_open_input_file(ObjPtr argl) {
   char *filename = cscmstr_to_utf8(p);
   FILE *fh = fopen(filename, "r");
   if (fh == NULL) {
-    fprintf(stderr, "%s: %s\n", filename, strerror(errno));
-    exit(1);
+    return fenew(utf8_to_scmstr(strerror(errno)), p);
   }
-  ObjPtr out = portnew(IPORT, filename, fh);
-  return out;
+  return portnew(IPORT, filename, fh);
 }
 ObjPtr scm_open_output_file(ObjPtr argl) {
   size_t len = clength(argl);
@@ -2069,11 +2341,9 @@ ObjPtr scm_open_output_file(ObjPtr argl) {
   char *filename = cscmstr_to_utf8(p);
   FILE *fh = fopen(filename, "w");
   if (fh == NULL) {
-    fprintf(stderr, "%s: %s\n", filename, strerror(errno));
-    exit(1);
+    return fenew(utf8_to_scmstr(strerror(errno)), p);
   }
-  ObjPtr out = portnew(OPORT, filename, fh);
-  return out;
+  return portnew(OPORT, filename, fh);
 }
 ObjPtr scm_input_port_open_p(ObjPtr argl) {
   if (clength(argl) != 1) {
@@ -2083,7 +2353,6 @@ ObjPtr scm_input_port_open_p(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   switch (p->t) {
   case IPORT:
     return true_ptr;
@@ -2103,7 +2372,6 @@ ObjPtr scm_input_port_p(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   switch (p->t) {
   case IPORT:
   case IPORT_CLOSED:
@@ -2120,7 +2388,6 @@ ObjPtr scm_output_port_p(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   switch (p->t) {
   case OPORT:
   case OPORT_CLOSED:
@@ -2137,7 +2404,6 @@ ObjPtr scm_output_port_open_p(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   switch (p->t) {
   case OPORT:
     return true_ptr;
@@ -2157,7 +2423,6 @@ ObjPtr scm_close_port(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   switch (p->t) {
   case IPORT:
     fclose(p->port->fh);
@@ -2183,7 +2448,6 @@ ObjPtr scm_read(ObjPtr argl) {
     if (err_p(p)) {
       return p;
     }
-
     if (p->t == IPORT) {
       yyrestart(p->port->fh);
       ObjPtr out = cread();
@@ -2208,6 +2472,39 @@ ObjPtr scm_eof_object_p(ObjPtr argl) {
   return argl->p->l == eof_ptr ? true_ptr : false_ptr;
 }
 /* system */
+ObjPtr scm_delete_file(ObjPtr argl) {
+  if (clength(argl) != 1) {
+    return num_err("delete-file", argl);
+  }
+  ObjPtr p = argl->p->l;
+  if (err_p(p)) {
+    return p;
+  }
+  if (p->t != STR || p->t != STREMPTY) {
+    return domain_err("delete-file", argl);
+  }
+  char *s = cscmstr_to_utf8(p);
+  int n = remove(s);
+  if (n == 0) {
+    return undef_ptr;
+  }
+  ObjPtr out = utf8_to_scmstr(strerror(errno));
+  return fenew(out, p);
+}
+ObjPtr scm_file_exists_p(ObjPtr argl) {
+  if (clength(argl) != 1) {
+    return num_err("file-exists?", argl);
+  }
+  ObjPtr p = argl->p->l;
+  if (err_p(p)) {
+    return p;
+  }
+  if (p->t != STR || p->t != STREMPTY) {
+    return domain_err("file-exists?", argl);
+  }
+  char *s = cscmstr_to_utf8(p);
+  return g_file_test(s, G_FILE_TEST_EXISTS) ? true_ptr : false_ptr;
+}
 ObjPtr scm_argv = NULL;
 ObjPtr scm_command_line(ObjPtr argl) {
   if (argl != empty_ptr) {
@@ -2234,7 +2531,6 @@ ObjPtr scm_system(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   if (p->t != STR && p->t != STREMPTY) {
     return domain_err("system", argl);
   }
@@ -2255,7 +2551,6 @@ ObjPtr scm_exp(ObjPtr argl) {
   if (err_p(p)) {
     return p;
   }
-
   switch (p->t) {
   case COMPLEX: {
     ObjPtr out = onew(COMPLEX);
@@ -2282,7 +2577,6 @@ ObjPtr scm_log(ObjPtr argl) {
     if (err_p(p)) {
       return p;
     }
-
     switch (p->t) {
     case COMPLEX: {
       ObjPtr out = onew(COMPLEX);
@@ -2312,7 +2606,8 @@ static void *allocate_function(size_t alloc_size) {
 static void *realloc_func(void *ptr, size_t old_size, size_t new_size) {
   return GC_REALLOC(ptr, new_size);
 }
-static void free_function(void *ptr, size_t size) { GC_FREE(ptr); }
+static void free_function(void *ptr, size_t size) { /* GC_FREE(ptr); */
+}
 void init() {
   GC_INIT();
 
@@ -2334,6 +2629,7 @@ void init() {
                   {"=", scm_math_equal},
                   {"/", scm_div},
                   {"<", scm_lt},
+                  {"binary-port?", scm_binary_port_p},
                   {"boolean?", scm_boolean_p},
                   {"car", scm_car},
                   {"cdr", scm_cdr},
@@ -2365,6 +2661,7 @@ void init() {
                   {"input-port?", scm_input_port_p},
                   {"integer->char", scm_integer_to_char},
                   {"list->string", scm_list_to_string},
+                  {"list->vector", scm_list_to_vector},
                   {"null?", scm_null_p},
                   {"number?", scm_number_p},
                   {"number->string", scm_number_to_string},
@@ -2372,11 +2669,11 @@ void init() {
                   {"output-port-open?", scm_output_port_open_p},
                   {"output-port?", scm_output_port_p},
                   {"pair?", scm_pair_p},
+                  {"peek-char", scm_peek_char},
                   {"procedure?", scm_procedure_p},
                   {"raise", scm_raise},
                   {"read-char", scm_read_char},
                   {"read-error?", scm_read_error_p},
-
                   {"round", scm_round},
                   {"set-car!", scm_set_car},
                   {"set-cdr!", scm_set_cdr},
@@ -2388,6 +2685,11 @@ void init() {
                   {"symbol?", scm_symbol_p},
                   {"textual-port?", scm_textual_port_p},
                   {"truncate", scm_truncate},
+                  {"vector->list", scm_vector_to_list},
+                  {"vector-length", scm_vector_length},
+                  {"vector-ref", scm_vector_ref},
+                  {"vector-set!", scm_vector_set},
+                  {"vector?", scm_vector_p},
 
                   /* case-lambda */
 
@@ -2407,14 +2709,20 @@ void init() {
                   {"imag-part", scm_imag_part},
                   {"real-part", scm_real_part},
 
+                  /* file library */
+                  {"delete-file", scm_delete_file},
+                  {"file-exists?", scm_file_exists_p},
+                  {"open-binary-input-file", scm_open_binary_input_file},
+                  {"open-binary-output-file", scm_open_binary_output_file},
+                  {"open-input-file", scm_open_input_file},
+                  {"open-output-file", scm_open_output_file},
+
                   /* inexact library */
                   {"exp", scm_exp},
                   {"infinite?", scm_infinite_p},
                   {"log", scm_log},
                   {"nan?", scm_nan_p},
 
-                  {"open-input-file", scm_open_input_file},
-                  {"open-output-file", scm_open_output_file},
                   {"read", scm_read},
                   {"system", scm_system},
                   {"write", scm_write},

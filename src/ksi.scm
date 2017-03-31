@@ -90,6 +90,7 @@
         (char? exp)
         (string? exp)
         (boolean? exp)
+        (vector? exp)
         (eq? exp (if #f #f))))
 
   (define (variable? exp) (symbol? exp))
@@ -102,7 +103,7 @@
   (define (tagged-list? exp tag)
     (if (pair? exp)
         (eq? (car exp) tag)
-        #f))
+#f))
 
   (define (assignment? exp)
     (tagged-list? exp 'set!))
@@ -182,13 +183,13 @@
   (define (and? exp) (tagged-list? exp 'and))
   (define (and->if clauses)
     (if (null? clauses)
-        #t
+#t
         (make-if (car clauses) (and->if (cdr clauses)) #f)))
 
   (define (or? exp) (tagged-list? exp 'or))
   (define (or->if clauses)
     (if (null? clauses)
-        #f
+#f
         (make-if (car clauses) #t (or->if (cdr clauses)))))
 
   (define (load? exp) (tagged-list? exp 'load))
@@ -283,6 +284,7 @@
           (cons '< <)
           (cons '= =)                    
           (cons 'apply apply)
+          (cons 'binary-port? binary-port?)
           (cons 'boolean? boolean?)
           (cons 'car car)
           (cons 'cdr cdr)
@@ -310,12 +312,14 @@
           (cons 'input-port? input-port?)
           (cons 'integer->char integer->char)
           (cons 'list->string list->string)
+          (cons 'list->vector list->vector)
           (cons 'number->string number->string)
           (cons 'number? number?)
           (cons 'numerator numerator)
           (cons 'output-port-open? output-port-open?)
           (cons 'output-port? output-port?)
           (cons 'pair? pair?)
+          (cons 'peek-char peek-char)
           (cons 'procedure? procedure?)
           (cons 'raise raise)
           (cons 'read-char read-char)
@@ -331,6 +335,14 @@
           (cons 'symbol? symbol?)
           (cons 'textual-port? textual-port?)
           (cons 'truncate truncate)
+          (cons 'vector vector)
+          (cons 'vector->list vector->list)
+          (cons 'vector-for-each vector-for-each)
+          (cons 'vector-length vector-length)
+          (cons 'vector-map vector-map)
+          (cons 'vector-ref vector-ref)
+          (cons 'vector-set! vector-set!)
+          (cons 'vector? vector?)
 
           ;; char library
           (cons 'char-alphabetic? char-alphabetic?)
@@ -342,6 +354,18 @@
           (cons 'char-upper-case? char-upper-case?)
           (cons 'char-whitespace? char-whitespace?)
           (cons 'digit-value digit-value)
+
+          ;; cxr library
+
+          ;; eval library
+
+          ;; file library
+          (cons 'delete-file delete-file)
+          (cons 'file-exists? file-exists?)
+          (cons 'open-binary-input-file open-binary-input-file)
+          (cons 'open-binary-output-file open-binary-output-file)
+          (cons 'open-input-file open-input-file)
+          (cons 'open-output-file open-output-file)
 
           ;; complex library
           (cons 'angle angle)

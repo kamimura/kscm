@@ -80,10 +80,22 @@
           ((and (not boolean1) (not boolean2)) (iter-false booleans))
           (#t #f)))
   ;; boolean? primitive
-
+  ;; bytevector
+  ;; bytevector-append
+  ;; bytevector-copy
+  ;; bytevector-copy!
+  ;; bytevector-length
+  ;; bytevector-u8-ref
+  ;; bytevector-u8-set!
+  ;; bytevector? 
   (define (caar pair) (car (car pair)))
   (define (cadr pair) (car (cdr pair)))
-
+  ;; call-with-current-continuation
+  (define (call-with-port port proc)
+    ((lambda (obj) (close-port port) obj)
+     (proc port)))
+  ;; call-with-values
+  ;; call/cc
   ;; car primitive
   ;; case
   (define (cdar pair) (cdr (car pair)))
@@ -141,7 +153,7 @@
   ;; define-record-type
   ;; define-syntax
   ;; define-values
-  ;; denominator
+  (define (denominator q) (numerator (/ q)))
   ;; do
   ;; dynamic-wind
   ;; else
@@ -169,21 +181,9 @@
           (#t #f)))
   ;; eqv? primitive
   ;; error primitive
-  ;; (define (error message . objs)
-  ;;   (define (iter objs)
-  ;;     (if (not (null? objs))
-  ;;         ((lambda ()
-  ;;            (display (car objs) (current-error-port))
-  ;;            (display " " (current-error-port))
-  ;;            (iter (cdr objs))))))
-  ;;   (display message (current-error-port))
-  ;;   (display " " (current-error-port))
-  ;;   (iter objs)
-  ;;   (display "\n" (current-error-port))
-  ;;   (exit 1))
   ;; error-object-irritants primitive
   ;; error-object-message primitive
-  ;; error-object?
+  ;; error-object? primitive
   (define (even? n) (not (odd? n)))
   ;; exact primitive
   ;; exact-integer-sqrt
@@ -238,7 +238,7 @@
   ;; input-port-open? primitive
   ;; input-port? primitive
   ;; integer->char primitive
-  (define (integer? obj) (and (number? obj) (= x (round x))))
+  (define (integer? obj) (and (number? obj) (= obj (round obj))))
   ;; lambda syntax
   (define (lcm . ns)
     (define (inner m n) (/ (* m n) (gcd m n)))
@@ -264,7 +264,7 @@
   ;; letrec->syntax
   (define (list . objs) objs)
   ;; list->string primitive
-  ;; list->vector
+  ;; list->vector primitive
   (define (list-copy obj)
     (if (pair? obj)
         (cons (car obj) (list-copy (cdr obj)))
@@ -286,7 +286,6 @@
           ((pair? obj) (list? (cdr obj)))
           (#t #f)))
   ;; make-bytevector
-  ;; make-list
   (define (make-list k . fill)
     (define f (if (null? fill) '() (car fill)))
     (define (iter k result)
@@ -299,8 +298,7 @@
     (define c (if (null? char) #\k (car char)))
     (list->string (make-list k c)))
   (define (make-vector k . fill)
-    (define f (if (null? fill) #\k (car fill)))
-    (list->vector (make-list k f)))
+    (list->vector (make-list k fill)))
   (define (map proc list)
     (if (null? list)
         '()
@@ -348,7 +346,7 @@
   ;; output-port? primitive
   ;; pair? primitive
   ;; parameterize
-  ;; peek-char
+  ;; peek-char primitive
   ;; peek-u8
   (define (port? obj)
     (or (input-port? obj)
@@ -409,7 +407,19 @@
              (iter (cons c result))))
        (read-char p)))
     (iter '()))
-  ;; read-string
+  (define (read-string k . port)
+    (define p (if (null? port) (current-input-port) (car port)))
+    (define (iter i result)
+      (if (= i k)
+          (list->string (reverse result))
+          (begin
+            (define c (read-char p))
+            (if (eof-object? c)
+                (if (null? result)
+                    (eof-object)
+                    (list->string (reverse result)))
+                (iter (+ i 1) (cons c result))))))
+    (iter 0 '()))
   ;; read-u8
   (define (real? obj) (and (number? obj) (zero? (imag-part obj))))
   ;; remainder
@@ -434,7 +444,12 @@
   ;; (define (string->number
   ;; string->symbol primitive
   ;; string->utf8
-  ;; string->vector
+  (define (string->vector string . args)
+    (define start (if (null? args) 0 (car args)))
+    (define end (if (or (null? args) (null? (cdr args)))
+                    (string-length string)
+                    (cadr args)))
+    (list->vector (string->list (string-copy string start end))))
   (define (string-append . strings)
     (define (iter1 strings result)
       (if (null? strings)
@@ -513,7 +528,7 @@
              (iter (car strings) (cdr strings)))
             (#t #f)))
     (iter string1 (cons string2 strings)))
-  (define (string=? string1 string2 . srrings)
+  (define (string=? string1 string2 . strings)
     (define (cmp string1 string2)
       (define (iter list1 list2)
         (cond ((null? list1) #t)
@@ -574,19 +589,60 @@
   ;; unquote-splicing
   ;; utf8->string
   ;; values
-  ;; vector
-  ;; vector->list
-  ;; vector->string
-  ;; vector-append
-  ;; vector-copy
-  ;; vector-copy!
-  ;; vector-fill!
-  ;; vector-for-each
-  ;; vector-length
-  ;; vector-map
-  ;; vector-ref
-  ;; vector-set!
-  ;; vector?
+  (define (vector . objs) (list->vector objs))
+  ;; vector->list primitive
+  (define (vector->string vector . args)
+    (define start (if (null? args) 0 (car args)))
+    (define end (if (or (null? args) (null? (cdr args)))
+                    (vector-length vector)
+                    (cadr args)))
+    (list->string (vector->list vector start end)))
+  (define (vector-append . vectors)
+    (list->vector (apply append (map (lambda (vector) (vector->list vector))
+                                     vectors))))
+  (define (vector-copy vector . args)
+    (define start (if (null? args) 0 (car args)))
+    (define end (if (or (null? args) (null? (cdr args)))
+                    (vector-length vector)
+                    (cadr args)))
+    (define vec (make-vector (- end start)))
+    (define (iter i j)
+      (if (= j end)
+          vec
+          (begin
+            (vector-set! vec i (vector-ref vector j))
+            (iter (+ i 1) (+ j 1)))))
+    (iter 0 start))
+  (define (vector-copy! to at from . args)
+    (define start (if (null? args) 0 (car args)))
+    (define end (if (or (null? args) (null? (cdr args)))
+                    (vector-length from)
+                    (cadr args)))
+    (define (iter i j)
+      (if (< j end)
+          (begin
+            (vector-set! to i (vector-ref from j))
+            (iter (+ i 1) (+ j 1)))))
+    (iter at start))
+  (define (vector-fill! vector fill . args)
+    (define start (if (null? args) 0 (car args)))
+    (define end (if (or (null? args) (null? (cdr args)))
+                    (vector-length vector)
+                    (cadr args)))
+    (define (iter i)
+      (if (< i end)
+          ((lambda ()
+             (vector-set! vector i fill)
+             (iter (+ i 1))))))
+    (iter start))  
+  (define (vector-for-each proc vector)
+    (for-each proc (vector->list)))
+  ;; vector-length primitive
+  (define (vector-map proc vector)
+    (list->vector (map proc (vector->list vector))))
+  ;; vector-ref primitive
+  ;; vector-set! primitive
+  ;; vector? primitive
   ;; when
   ;; with-exception-handler
   ;; write-bytevector

@@ -42,6 +42,11 @@ symbol_element ({any_character_other_than_vertical_line_or_backslash}|{inline_he
 "'" |
 "." { return yytext[0];}
 
+"#(" { return LEX_OP; }
+
+"+i" { yylval.p = znew_fr("1"); return LEX_Z;}
+"-i" { yylval.p = znew_fr("-1"); return LEX_Z;}
+
 {initial}([0-9a-zA-Z!$%&*/:<=>?^_~.@+-]|{multi})* {
   yylval.p = symnew(yytext); return LEX_SYM;
 }
@@ -166,6 +171,10 @@ symbol_element ({any_character_other_than_vertical_line_or_backslash}|{inline_he
 }
 <IMG>[0-9]*"i" {
   BEGIN INITIAL;
+  if (yyleng == 1) {
+    yylval.p = znew_fr_fr(sgn, "1");
+    return LEX_Z;
+  }
   yytext[yyleng - 1] = '\0';
   yylval.p = znew_fr_fr(sgn, yytext);
   return LEX_Z;
@@ -182,6 +191,7 @@ symbol_element ({any_character_other_than_vertical_line_or_backslash}|{inline_he
   yylval.p = znew_fr_fr(sgn, yytext);
   return LEX_Z;
 }
+
 ("-"|"+")[0-9]*"i" {
   if (yyleng == 2) {
     yylval.p = yytext[0] == '+' ? znew_fr("1") : znew_fr("-1");

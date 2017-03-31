@@ -45,7 +45,7 @@ extern int yydebug;
 # define YYTOKENTYPE
   enum yytokentype
   {
-    LEX_SHARP = 258,
+    LEX_OP = 258,
     LEX_Q = 259,
     LEX_Z = 260,
     LEX_SYM = 261,

@@ -39,9 +39,8 @@
              (display (car objs) (current-error-port))
              (display " " (current-error-port))
              (iter (cdr objs))))))
-    (if (not (string=? message ""))
-        (begin
-          (display message (current-error-port))))
+    (display " ")
+    (display message (current-error-port))
     (iter objs)
     (display "\n" (current-error-port))
     (exit 1))
@@ -138,6 +137,9 @@
                         "cnewuc(" (number->string (char->integer obj)) ")"))
           ((eq? obj undef) "undef_ptr")
           ((boolean? obj) (if obj "true_ptr" "false_ptr"))
+          ((vector? obj) (string-append "clist_to_vector("
+                                        (const (vector->list obj))
+                                        ")"))
           (#t (error "const" obj))))
   
   (define (caddr p) (car (cdr (cdr p))))
@@ -178,6 +180,7 @@
           ((boolean? exp) #t)
           ((char? exp) #t)
           ((null? exp) #t)
+          ((vector? exp) #t)
           (#t #f)))
   (define (variable? exp) (symbol? exp))
   (define (quoted? exp)

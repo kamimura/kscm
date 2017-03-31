@@ -14,7 +14,7 @@ ObjPtr inop;
 
                         
 %token
-                        LEX_SHARP
+                        LEX_OP
 
 %token  <p>             LEX_Q
                         LEX_Z
@@ -42,7 +42,8 @@ ObjPtr inop;
                         list
                         dotted_list
                         tail
-                        abbreviation                      
+                        abbreviation
+                        vector
 %%
 program:        datum
                 {
@@ -103,6 +104,7 @@ number:         LEX_Q
         ;
 compound_datum: list
         |       abbreviation
+        |       vector
         ;
 list:           '(' datum_asterisk ')'
                 {
@@ -127,6 +129,11 @@ tail:           datum '.' datum ')'
 abbreviation:   '\'' datum
                 {
                     $$ = pnew(quote_ptr, pnew($2, empty_ptr));
+                }
+        ;
+vector:         LEX_OP datum_asterisk ')'
+                {
+                    $$ = clist_to_vector($2);
                 }
         ;
 %%
